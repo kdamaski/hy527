@@ -22,14 +22,13 @@ void Thread_init(void) {
     return;
   }
   thr_q = (struct thread_queue *)malloc(sizeof(struct thread_queue));
-  // allocate the stack size for my user-level threads
-  // (unsigned long)malloc(64 * KB)
-  posix_memalign((void *)_STACK, 16, 64 * KB);
   if (!thr_q) {
     fprintf(stderr, "malloc failed to allocate space\n");
     exit(1);
   }
   thr_q->head = thr_q->tail = NULL;
+  // allocate the stack size for my user-level threads
+  posix_memalign((void **)&_STACK, 16, 64 * KB);
 }
 
 int Thread_self(void) { return (unsigned)thr_q->head->id; }
@@ -41,7 +40,7 @@ void Thread_exit(int code) {
   case 0:
   case 1:
   case 2:
-  default:;
+  default:
     printf("thread %u exited with code %d\n", thr_q->head->id, code);
   }
   thr_dequeue();

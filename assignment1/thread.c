@@ -7,9 +7,10 @@
 
 #define KB 1024
 
-unsigned long _STACK;
-unsigned n_threads = 0;
-unsigned size_of_thread_stack = 32;
+void *_STACK;
+unsigned stack_size;
+unsigned n_threads;
+unsigned size_of_thread_stack;
 
 extern void _swtch(void *from, void *to);
 extern void _thrstart(void *arg, int func(void *));
@@ -28,8 +29,12 @@ void Thread_init(void) {
     exit(1);
   }
   thr_q->head = thr_q->tail = NULL;
+
+  n_threads = 0;
+  size_of_thread_stack = 32;
   // allocate the stack size for my user-level threads
-  posix_memalign((void **)&_STACK, 16, 64 * KB);
+  stack_size = 64 * KB;
+  posix_memalign(&_STACK, 16, stack_size);
 }
 
 int Thread_self(void) { return (unsigned)thr_q->head->id; }
@@ -51,14 +56,14 @@ void Thread_exit(int code) {
 void Thread_pause(void) {
   // extract from and to *sp values and call _swtch
   if (thr_q->head->next) {
-    void *from = thr_q->head->sp;
-    void *to = thr_q->head->next->sp;
+    void *from = thr_q->head;
+    void *to = thr_q->head->next;
     thr_enqueue(thr_dequeue());
     // print_Q();
-    asm volatile("movl %0, %%esp" ::"r"(thr_q->head->sp));
+    // asm volatile("movl %0, %%esp" ::"r"(thr_q->head->sp));
     _swtch(from, to);
   } else {
-    printf("Thread %u cannot pause since there is no other job to run\n",
+    printf("Thread %u cannot yield since there is no other job to run\n",
            thr_q->head->id);
   }
 }
@@ -67,12 +72,12 @@ int Thread_join(int tid) { return Thread_self(); }
 
 int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
   struct damthread *new_thr =
-      (struct damthread *)(_STACK + n_threads * size_of_thread_stack);
+      (struct damthread *)malloc(sizeof(struct damthread));
   // sp is the first element of struct
-  new_thr->sp = new_thr + size_of_thread_stack;
+  new_thr->sp = (_STACK + stack_size - 1 - n_threads * size_of_thread_stack);
   new_thr->id = (unsigned)new_thr; // Testing in 32 bit architecture
   //
-  new_thr->args = (void *)new_thr + sizeof(struct damthread);
+  new_thr->args = malloc(nbytes);
   if (!new_thr->args) {
     fprintf(stderr, "malloc failed to allocate space\n");
     return -1;

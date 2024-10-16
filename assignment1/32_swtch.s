@@ -5,8 +5,8 @@ __swtch:              # _swtch has two arguments that are pointers
 _swtch:
 	subl	$32,%esp      # move stack pointer to fit 4 new 32bit values
 	movl	%eax,0(%esp)  # save general purpose registers in this stack
-	movl	%ebx,4(%esp)
-	movl	%ecx,8(%esp)
+	movl	%ebx,4(%esp)  # eax holds *to
+	movl	%ecx,8(%esp)  # ecx holds *from
 	movl	%edx,12(%esp)
 	movl	%esi,16(%esp) 
 	movl	%edi,20(%esp)
@@ -29,8 +29,8 @@ _swtch:
 .globl	_thrstart
 __thrstart:
 _thrstart:
-	pushl	%edi          # edi register holds void *args of my threads 
-	call	*%esi         # esi holds the func and here we call it
+	pushl	%edx          # edx register holds void *args of my threads 
+	call	*%ecx         # ecx holds the func and here we call it
 	pushl	%eax          # eax here holds the return value of the thread func which is an integer
 	call	Thread_exit   # call thread exit with the exit code from eax
 .globl	__ENDMONITOR

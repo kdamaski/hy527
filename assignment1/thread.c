@@ -9,6 +9,7 @@
 
 unsigned long _STACK;
 unsigned n_threads = 0;
+unsigned size_of_thread_stack = 32;
 
 extern void _swtch(void *from, void *to);
 extern void _thrstart(void *arg, int func(void *));
@@ -54,6 +55,7 @@ void Thread_pause(void) {
     void *to = thr_q->head->next->sp;
     thr_enqueue(thr_dequeue());
     // print_Q();
+    asm volatile("movl %0, %%esp" ::"r"(thr_q->head->sp));
     _swtch(from, to);
   } else {
     printf("Thread %u cannot pause since there is no other job to run\n",
@@ -65,10 +67,9 @@ int Thread_join(int tid) { return Thread_self(); }
 
 int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
   struct damthread *new_thr =
-      (struct damthread *)(_STACK +
-                           n_threads * (nbytes + sizeof(struct damthread)));
+      (struct damthread *)(_STACK + n_threads * size_of_thread_stack);
   // sp is the first element of struct
-  new_thr->sp = new_thr + sizeof(struct damthread);
+  new_thr->sp = new_thr + size_of_thread_stack;
   new_thr->id = (unsigned)new_thr; // Testing in 32 bit architecture
   //
   new_thr->args = (void *)new_thr + sizeof(struct damthread);
@@ -92,9 +93,9 @@ int mytestfunc(void *args) {
 
 int schedule() {
   if (thr_q->head) {
-    // _thrstart(thr_q->head->args, thr_q->head->pc);
-    // return 0;
-    return thr_q->head->pc(thr_q->head->args);
+    // restore the threads esp
+    _thrstart(thr_q->head->args, thr_q->head->pc);
+    return 0;
   } else {
     printf("Cannot run Q empty\n");
     return -1;

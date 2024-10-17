@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 extern struct thread_queue *thr_q;
-extern unsigned n_threads;
+// extern unsigned n_threads;
 
 void thr_enqueue(struct damthread *th) {
   if (thr_q->head == NULL) {
@@ -15,7 +15,7 @@ void thr_enqueue(struct damthread *th) {
     th->next = NULL;
     thr_q->tail = th;
   }
-  ++n_threads;
+  // ++n_threads;
 }
 
 // remove from head
@@ -27,7 +27,7 @@ struct damthread *thr_dequeue() {
   struct damthread *out = thr_q->head;
   thr_q->head = thr_q->head->next;
   return out; // NOTE i am not calling free
-  --n_threads;
+  // --n_threads;
 }
 
 void print_Q() {

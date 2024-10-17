@@ -7,10 +7,7 @@
 
 #define KB 1024
 
-void *_STACK;
 unsigned stack_size;
-unsigned n_threads;
-unsigned size_of_thread_stack;
 
 extern void _swtch(void *from, void *to);
 extern void _thrstart(void *arg, int func(void *));
@@ -30,11 +27,10 @@ void Thread_init(void) {
   }
   thr_q->head = thr_q->tail = NULL;
 
-  n_threads = 0;
-  size_of_thread_stack = 32;
+  // n_threads = 0;
   // allocate the stack size for my user-level threads
-  stack_size = 64 * KB;
-  posix_memalign(&_STACK, 16, stack_size);
+  stack_size = 16 * KB;
+  // posix_memalign(&_STACK, 16, stack_size);
 }
 
 int Thread_self(void) { return (unsigned)thr_q->head->id; }
@@ -71,10 +67,10 @@ void Thread_pause(void) {
 int Thread_join(int tid) { return Thread_self(); }
 
 int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
-  struct damthread *new_thr =
-      (struct damthread *)malloc(sizeof(struct damthread));
+  struct damthread *new_thr;
+  posix_memalign(&new_thr, 16, stack_size + sizeof(struct damthread));
   // sp is the first element of struct
-  new_thr->sp = (_STACK + stack_size - 1 - n_threads * size_of_thread_stack);
+  new_thr->sp = new_thr + stack_size + sizeof(struct damthread) - 1; // TODO
   new_thr->id = (unsigned)new_thr; // Testing in 32 bit architecture
   //
   new_thr->args = malloc(nbytes);
@@ -113,6 +109,6 @@ int main() {
   Thread_new(mytestfunc, (void *)&arg1, sizeof(int), 1, NULL);
   Thread_new(mytestfunc, (void *)&arg2, sizeof(int), 2, NULL);
   print_Q();
-  Thread_exit(schedule());
-  Thread_exit(schedule());
+  schedule();
+  schedule();
 }

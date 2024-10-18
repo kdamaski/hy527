@@ -8,15 +8,15 @@ void Thread_init(void);
 int Thread_new(int func(void *), void *args, size_t nbytes, ...);
 void Thread_exit(int code);
 int Thread_self(void);
-int Thread_join(int tid);
+int Thread_join(unsigned tid);
 void Thread_pause(void);
 
 struct damthread {
-  void *sp; // stack pointer has to be first element of the struct to simplify
-  unsigned id;
+  unsigned long *sp;
   int (*pc)(void *);
-  struct damthread *next;
   void *args;
+  unsigned long id;
+  struct damthread *next;
 };
 
 struct thread_queue {

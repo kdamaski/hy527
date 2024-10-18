@@ -8,6 +8,7 @@
 #define KB 1024
 
 unsigned stack_size;
+unsigned n_threads;
 
 extern void _swtch(void *from, void *to);
 extern void _thrstart(void *arg, int func(void *));
@@ -27,10 +28,40 @@ void Thread_init(void) {
   }
   thr_q->head = thr_q->tail = NULL;
 
-  // n_threads = 0;
+  n_threads = 0;
   // allocate the stack size for my user-level threads
   stack_size = 16 * KB;
-  // posix_memalign(&_STACK, 16, stack_size);
+}
+
+int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
+  assert(func && args && (nbytes >= 0));
+  struct damthread *new_thr;
+  // start of critical section. Will care when preemption comes
+  if (posix_memalign((void **)&new_thr, 16,
+                     stack_size + sizeof(struct damthread) + nbytes) != 0) {
+    fprintf(stderr, "memory allocation failed for thread stack\n");
+    exit(1);
+  }
+  new_thr->pc = func;
+  new_thr->args = args;
+  // leave space (nbytes) under the stack pointer for args value
+  new_thr->sp = (unsigned long *)((void *)new_thr + stack_size +
+                                  sizeof(struct damthread));
+  // copy the args into the bottom of the allocated stack
+  memcpy((void *)new_thr->sp, args, nbytes);
+
+  // Place _thrstart in the return address of our thread stack
+  --new_thr->sp;
+  *(new_thr->sp) = (unsigned long)_thrstart;
+  // now allocate 4 words for the general purpose registers that are saved
+  new_thr->sp -= 4;
+  new_thr->sp[1] =
+      (unsigned long)new_thr->pc; // Those 2 args are for context restore
+  new_thr->sp[2] = (unsigned long)args;
+
+  new_thr->id = (unsigned long)new_thr; // Testing in 32 bit architecture
+  thr_enqueue(new_thr);
+  return 0;
 }
 
 int Thread_self(void) { return (unsigned)thr_q->head->id; }
@@ -43,59 +74,55 @@ void Thread_exit(int code) {
   case 1:
   case 2:
   default:
-    printf("thread %u exited with code %d\n", thr_q->head->id, code);
+    printf("thread %lu exited with code %d\n", thr_q->head->id, code);
   }
   thr_dequeue();
 }
 
 /* Thread_pause is called by the currently running thread */
 void Thread_pause(void) {
+  assert(thr_q->head);
   // extract from and to *sp values and call _swtch
   if (thr_q->head->next) {
     void *from = thr_q->head;
     void *to = thr_q->head->next;
     thr_enqueue(thr_dequeue());
-    // print_Q();
-    // asm volatile("movl %0, %%esp" ::"r"(thr_q->head->sp));
     _swtch(from, to);
   } else {
-    printf("Thread %u cannot yield since there is no other job to run\n",
+    printf("Thread %lu cannot pause since there is no other job to run\n",
            thr_q->head->id);
   }
 }
 
-int Thread_join(int tid) { return Thread_self(); }
-
-int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
-  struct damthread *new_thr;
-  posix_memalign(&new_thr, 16, stack_size + sizeof(struct damthread));
-  // sp is the first element of struct
-  new_thr->sp = new_thr + stack_size + sizeof(struct damthread) - 1; // TODO
-  new_thr->id = (unsigned)new_thr; // Testing in 32 bit architecture
-  //
-  new_thr->args = malloc(nbytes);
-  if (!new_thr->args) {
-    fprintf(stderr, "malloc failed to allocate space\n");
-    return -1;
+int Thread_join(unsigned tid) {
+  assert(thr_q->head && thr_q->head->id != tid);
+  if (tid != 0) {
+    // wait for thread tid
+    return tid;
+  } else {
+    // wait for all threads
+    return 0;
   }
-  memcpy(new_thr->args, args, nbytes);
-  new_thr->pc = func;
-  thr_enqueue(new_thr); // n_threads adjusted here
-  return 0;
 }
 
 int mytestfunc(void *args) {
   int arg = *(int *)args;
-  printf("Thread %u is running with arg=%d\n", thr_q->head->id, arg);
+  printf("Thread %lu is running with arg=%d\n", thr_q->head->id, arg);
   Thread_pause();
-  printf("Thread %u is back to running with arg=%d\n", thr_q->head->id, arg);
+  printf("Thread %lu is back to running with arg=%d\n", thr_q->head->id, arg);
   return Thread_self();
 }
 
 int schedule() {
   if (thr_q->head) {
-    // restore the threads esp
-    _thrstart(thr_q->head->args, thr_q->head->pc);
+    assert(thr_q->head);
+    // extract from and to *sp values and call _swtch
+    if (thr_q->head->next) {
+      thr_q->head->pc(thr_q->head->args);
+    } else {
+      printf("Thread %lu cannot yield since there is no other job to run\n",
+             thr_q->head->id);
+    }
     return 0;
   } else {
     printf("Cannot run Q empty\n");
@@ -106,9 +133,9 @@ int schedule() {
 int main() {
   int arg1 = 4, arg2 = 5;
   Thread_init();
-  Thread_new(mytestfunc, (void *)&arg1, sizeof(int), 1, NULL);
-  Thread_new(mytestfunc, (void *)&arg2, sizeof(int), 2, NULL);
-  print_Q();
+  Thread_new(mytestfunc, (void *)&arg1, sizeof(int), NULL);
+  Thread_new(mytestfunc, (void *)&arg2, sizeof(int), NULL);
+  // print_Q();
   schedule();
-  schedule();
+  // schedule();
 }

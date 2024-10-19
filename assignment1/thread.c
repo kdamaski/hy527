@@ -9,7 +9,6 @@
 
 unsigned stack_size;
 unsigned n_threads;
-unsigned long *root_thread;
 
 extern void _swtch(void *from, void *to);
 extern void _thrstart(void *arg, int func(void *));
@@ -31,7 +30,7 @@ void Thread_init(void) {
   }
   thr_q->head = thr_q->tail = NULL;
 
-  n_threads = 0;
+  n_threads = 1;
   // allocate the stack size for my user-level threads
   stack_size = 16 * KB;
 
@@ -44,7 +43,6 @@ void Thread_init(void) {
   free_list->head = free_list->next = NULL;
 }
 
-char first_thread = 1;
 int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
   assert(func && args && (nbytes >= 0));
   struct damthread *new_thr;
@@ -55,10 +53,6 @@ int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
                      stack_size + sizeof(struct damthread) + nbytes) != 0) {
     fprintf(stderr, "memory allocation failed for thread stack\n");
     exit(1);
-  }
-  if (first_thread) { // first thread holds the stack of process
-    first_thread = 0;
-    root_thread = (unsigned long *)new_thr;
   }
 
   // those 2 fields seem meaningless but i need them for testing
@@ -106,11 +100,8 @@ void Thread_exit(int code) {
         tmp = tmp->next;
       }
     }
-    //   else if (n_threads == 2) { // n_threads will decrease in thr_dequeue
-    //   Thread_pause();
-    // }
     if (--n_threads == 0) {
-      exit(0);
+      return;
     } else {
       Thread_pause();
     }
@@ -141,9 +132,9 @@ void Thread_pause(void) {
   }
 }
 
-char join_0_call = 1;
+char join_0_called = 0;
 int Thread_join(unsigned tid) { // tid is also the address of the thread
-  assert(thr_q->head && thr_q->head->id != tid && join_0_call);
+  assert(thr_q->head && thr_q->head->id != tid && !join_0_called);
   if (tid != 0) {
     struct damthread *th_to_join = thread_exists(tid);
     if (!th_to_join) {
@@ -152,7 +143,7 @@ int Thread_join(unsigned tid) { // tid is also the address of the thread
     th_to_join->thr_joining = thr_q->head;
     return tid;
   } else {
-    join_0_call = 0;
+    join_0_called = 1;
     // wait for all threads
     Thread_exit(0);
     return 0;
@@ -195,4 +186,5 @@ int main() {
   int thid3 = Thread_new(mytestfunc, (void *)&arg3, sizeof(int), NULL);
   schedule();
   Thread_join(0);
+  printf("Yeah returned\n");
 }

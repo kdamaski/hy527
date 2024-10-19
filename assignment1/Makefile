@@ -1,3 +1,3 @@
 
 default:
-	gcc -m32 thread.c misc.c 32_swtch.s
+	gcc -m32 thread.c misc.c swtch_x86.s

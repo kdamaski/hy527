@@ -1,4 +1,3 @@
-
 #ifndef THREAD_INCLUDED
 #define THREAD_INCLUDED
 
@@ -16,12 +15,18 @@ struct damthread {
   int (*pc)(void *);
   void *args;
   unsigned long id;
+  struct damthread *thr_joining; // threads that wait on me
   struct damthread *next;
 };
 
 struct thread_queue {
   struct damthread *head;
   struct damthread *tail;
+};
+
+struct freelist {
+  struct damthread *head;
+  struct damthread *next;
 };
 
 #endif

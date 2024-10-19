@@ -145,6 +145,11 @@ int Thread_join(unsigned tid) { // tid is also the address of the thread
   } else {
     join_0_called = 1;
     // wait for all threads
+    // struct damthread *tmp = thr_q->head->next;
+    // while (tmp) {
+    //   tmp = tmp->next;
+    // }
+    printf("Don't know what to do in Join(0) yet. I am confused\n");
     Thread_exit(0);
     return 0;
   }
@@ -156,6 +161,17 @@ int mytestfunc(void *args) {
   for (int i = 0; i < 250000; ++i) {
     ++arg;
   }
+  printf("Thread %lu spinned 25k times into ++arg=%d\n", thr_q->head->id, arg);
+  return Thread_self();
+}
+
+int myjointestfunc(void *args) {
+  int arg = *(int *)args;
+  int arg1 = arg + 1000;
+  printf("Thread %lu is running with arg=%d and will create a thread and join "
+         "it\n",
+         thr_q->head->id, arg);
+  Thread_join(Thread_new(mytestfunc, (void *)(&arg1), sizeof(int), NULL));
   printf("Thread %lu spinned 25k times into ++arg=%d\n", thr_q->head->id, arg);
   return Thread_self();
 }
@@ -173,7 +189,7 @@ int schedule() { // basically main calls this
     thr_q->head->pc(thr_q->head->args); // function call saves the stack of main
     return 0;
   } else {
-    printf("Cannot run Q empty\n");
+    printf("Cannot run empty Q\n");
     return -1;
   }
 }
@@ -183,7 +199,7 @@ int main() {
   Thread_init();
   int thid1 = Thread_new(mytestfunc, (void *)&arg1, sizeof(int), NULL);
   int thid2 = Thread_new(mytestfunc, (void *)&arg2, sizeof(int), NULL);
-  int thid3 = Thread_new(mytestfunc, (void *)&arg3, sizeof(int), NULL);
+  int thid3 = Thread_new(myjointestfunc, (void *)&arg3, sizeof(int), NULL);
   schedule();
   Thread_join(0);
   printf("Yeah returned\n");

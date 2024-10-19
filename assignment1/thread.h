@@ -16,6 +16,7 @@ struct damthread {
   void *args;
   unsigned long id;
   struct damthread *thr_joining; // threads that wait on me
+  // NOTE perhaps add a flag or pointer to show which Q thread is in
   struct damthread *next;
 };
 

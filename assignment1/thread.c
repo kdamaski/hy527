@@ -74,7 +74,10 @@ int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
 
   // init queue state
   new_thr->to_run = 1; // mark thread initialized
-  new_thr->next = new_thr->jlist = NULL;
+  new_thr->next = new_thr->jlist = new_thr->prev = NULL;
+
+  // if Join called thread_new then do not add thread to ready_q. Not
+  // implementing this...
   ready_enqueue(new_thr);
   ++n_threads;
 
@@ -102,10 +105,9 @@ void Thread_exit(int code) {
       }
     }
     if (--n_threads == 0) {
+      // restore esp and ebp of main
       asm volatile("movl  %0,%%esp\n\t" ::"r"(main_esp));
-      // printf("Now esp has %p\n", main_esp);
       asm volatile("movl  %0,%%ebp\n\t" ::"r"(main_ebp));
-      // printf("Now ebp has %p\n", main_ebp);
       return;
       // exit(0);
     } else {
@@ -122,7 +124,7 @@ void Thread_pause(void) {
   if (n_threads > 1) {
     void *from = ready_q->head;
     void *to = ready_q->head = ready_q->head->next;
-    ready_enqueue(ready_dequeue());
+    ready_enqueue(ready_dequeue()); // from goes last and to comes front
     _swtch(from, to);
   } else {
     // last thread to finish!!
@@ -145,11 +147,13 @@ int Thread_join(unsigned long tid) {
   struct u_thread *th_to_join = (struct u_thread *)tid;
   if (tid != 0) {                  // tid is also the address of the thread
     if (th_to_join->to_run == 0) { // if it is put in free list
+      printf("Thread with tid %lu has already exited\n", tid);
       return -1;
-    } // NOTE th to join did not get removed from ready_q
+    } // NOTE th_to_join did not get removed from ready_q necessarily
+
     ready_q->head->jlist = th_to_join;
     push_to_join(th_to_join);
-    Thread_pause();
+    // NOTE this is trial
     return tid;
   } else {
     join_0_called = 1;
@@ -179,7 +183,9 @@ int myjointestfunc(void *args) {
   printf("Thread %lu is running with arg=%d and will create a thread with "
          "arg=%d and join it\n",
          ready_q->head->id, arg, arg1);
+
   Thread_join(Thread_new(mytestfunc, (void *)(&arg1), sizeof(int), NULL));
+
   printf("Thread %lu returned after calling join on thread with arg=%d\n",
          ready_q->head->id, arg1);
   return Thread_self();
@@ -195,7 +201,7 @@ int schedule() { // basically main calls this
   if (ready_q->head) {
     thr_started = 1;
 
-    // save main esp in a variable
+    // save process (schedule func's) esp and ebp in globals
     asm volatile("movl  %%esp,[main_esp]\n\t" ::"r"(main_esp));
     // printf("Esp (schedule() sp) that i saved has value=%p\n", main_esp);
     asm volatile("movl  %%ebp,[main_ebp]\n\t" ::"r"(main_ebp));
@@ -221,8 +227,9 @@ int main() {
   Thread_init();
   int thid1 = Thread_new(mytestfunc, (void *)&arg1, sizeof(int), NULL);
   int thid2 = Thread_new(mytestfunc, (void *)&arg2, sizeof(int), NULL);
+  // int thid3 = Thread_new(myjointestfunc, (void *)&arg3, sizeof(int), NULL);
   int thid3 = Thread_new(mytestfunc, (void *)&arg3, sizeof(int), NULL);
   schedule(); // runs the first thread
-  // Thread_join(0);
-  // printf("Returned to main successfully\n");
+  // Thread_join(0); // Join is bugged
+  printf("Returned to main successfully\n");
 }

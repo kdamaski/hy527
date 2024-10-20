@@ -17,7 +17,7 @@ _swtch:
 	movl	8(%esp),%edi
 	movl	12(%esp),%ebp	# restore stack base pointer
 	addl	$16, %esp			# free current stack frame
-	ret						      # return to address in stack ( _thrstart )
+	ret						      # return to address in stack (_thrstart) manually planted
 .align	4
 .globl	__thrstart
 .globl	_thrstart

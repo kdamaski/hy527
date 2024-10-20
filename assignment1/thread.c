@@ -10,6 +10,9 @@
 unsigned stack_size;
 unsigned n_threads;
 
+unsigned long *main_esp;
+unsigned long *main_ebp;
+
 extern void _swtch(void *from, void *to);
 extern void _thrstart(void *arg, int func(void *));
 
@@ -70,7 +73,7 @@ int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
   new_thr->sp[2] = (unsigned long)args; // in the order of the given swtch.s
 
   // init queue state
-  new_thr->handle = 1; // mark thread initialized
+  new_thr->to_run = 1; // mark thread initialized
   new_thr->next = new_thr->jlist = NULL;
   ready_enqueue(new_thr);
   ++n_threads;
@@ -99,7 +102,12 @@ void Thread_exit(int code) {
       }
     }
     if (--n_threads == 0) {
-      exit(0);
+      asm volatile("movl  %0,%%esp\n\t" ::"r"(main_esp));
+      // printf("Now esp has %p\n", main_esp);
+      asm volatile("movl  %0,%%ebp\n\t" ::"r"(main_ebp));
+      // printf("Now ebp has %p\n", main_ebp);
+      return;
+      // exit(0);
     } else {
       Thread_pause();
     }
@@ -111,22 +119,22 @@ void Thread_exit(int code) {
 void Thread_pause(void) {
   assert(ready_q->head);
   // extract from and to *sp values and call _swtch
-  if (ready_q->head) {
+  if (n_threads > 1) {
     void *from = ready_q->head;
     void *to = ready_q->head = ready_q->head->next;
-    // ready_enqueue(ready_dequeue());
+    ready_enqueue(ready_dequeue());
     _swtch(from, to);
   } else {
     // last thread to finish!!
     // switch esp to the last thread available
-    // asm volatile("movl	%0,%%esp\n\t" ::"r"(ready_q->head->sp));
+    asm volatile("movl	%0,%%esp\n\t" ::"r"(ready_q->head->sp));
 
-    // asm volatile("movl	0(%esp),%ebx\n\t"
-    //              "movl	4(%esp),%esi\n\t"
-    //              "movl	8(%esp),%edi\n\t"
-    //              "movl	12(%esp),%ebp\n\t"
-    //              "addl	$16, %esp\n\t"
-    //              "ret\n\t");
+    asm volatile("movl	0(%esp),%ebx\n\t"
+                 "movl	4(%esp),%esi\n\t"
+                 "movl	8(%esp),%edi\n\t"
+                 "movl	12(%esp),%ebp\n\t"
+                 "addl	$16, %esp\n\t"
+                 "ret\n\t");
   }
 }
 
@@ -136,7 +144,7 @@ int Thread_join(unsigned long tid) {
   assert(ready_q->head && ready_q->head->id != tid && !join_0_called);
   struct u_thread *th_to_join = (struct u_thread *)tid;
   if (tid != 0) {                  // tid is also the address of the thread
-    if (th_to_join->handle == 0) { // if it is put in free list
+    if (th_to_join->to_run == 0) { // if it is put in free list
       return -1;
     } // NOTE th to join did not get removed from ready_q
     ready_q->head->jlist = th_to_join;
@@ -177,25 +185,36 @@ int myjointestfunc(void *args) {
   return Thread_self();
 }
 
-// char thr_started = 0;
-// int schedule() { // basically main calls this
-//   assert(ready_q->head);
-//   if (thr_started) {
-//     printf("Already scheduled\n");
-//     return 1;
-//   }
-//   if (ready_q->head) {
-//     thr_started = 1;
-//     // start first thread
-//     ready_q->head = ready_q->head;
-//     ready_q->head->pc(
-//         ready_q->head->args); // function call saves the stack of main
-//     return 0;
-//   } else {
-//     printf("Cannot run empty Q\n");
-//     return -1;
-//   }
-// }
+char thr_started = 0;
+int schedule() { // basically main calls this
+  assert(ready_q->head);
+  if (thr_started) {
+    printf("Already scheduled\n");
+    return 1;
+  }
+  if (ready_q->head) {
+    thr_started = 1;
+
+    // save main esp in a variable
+    asm volatile("movl  %%esp,[main_esp]\n\t" ::"r"(main_esp));
+    // printf("Esp (schedule() sp) that i saved has value=%p\n", main_esp);
+    asm volatile("movl  %%ebp,[main_ebp]\n\t" ::"r"(main_ebp));
+    // printf("ebp (schedule() bp) that i saved has value=%p\n", main_ebp);
+
+    asm volatile("movl	%0,%%esp\n\t" ::"r"(ready_q->head->sp));
+
+    asm volatile("movl	0(%esp),%ebx\n\t"
+                 "movl	4(%esp),%esi\n\t"
+                 "movl	8(%esp),%edi\n\t"
+                 "movl	12(%esp),%ebp\n\t"
+                 "addl	$16, %esp\n\t"
+                 "ret\n\t");
+    return 0;
+  } else {
+    printf("Cannot run empty Q\n");
+    return -1;
+  }
+}
 
 int main() {
   int arg1 = 4, arg2 = 5, arg3 = 6;
@@ -203,7 +222,7 @@ int main() {
   int thid1 = Thread_new(mytestfunc, (void *)&arg1, sizeof(int), NULL);
   int thid2 = Thread_new(mytestfunc, (void *)&arg2, sizeof(int), NULL);
   int thid3 = Thread_new(mytestfunc, (void *)&arg3, sizeof(int), NULL);
-  Thread_exit(0); // runs the first thread
-  Thread_join(thid2);
-  printf("Yeah returned\n");
+  schedule(); // runs the first thread
+  // Thread_join(0);
+  // printf("Returned to main successfully\n");
 }

@@ -19,7 +19,7 @@ struct u_thread {
   unsigned long id;
   struct u_thread *next;
   struct u_thread *jlist; // a jlist for thread
-  char handle;            // instead of holding enum state
+  char to_run;            // i mainly care for free or artive
 };
 
 struct th_ready_q {

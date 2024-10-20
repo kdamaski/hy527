@@ -11,7 +11,7 @@ extern unsigned n_threads;
 
 void push_to_free(struct u_thread *th) {
   assert(free_list);
-  th->handle = 0;
+  th->to_run = 0;
   th->next = free_list->next;
   free_list = th;
 }

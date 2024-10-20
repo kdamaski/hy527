@@ -1,47 +1,48 @@
-#include "misc.h"
+// #include "misc.h" was prompting error conflicting types
 #include "thread.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-extern struct thread_queue *thr_q;
-extern struct freelist *free_list;
+extern struct th_ready_q *ready_q;
+extern struct u_thread *free_list;
+extern struct u_thread *join_list;
 extern unsigned n_threads;
 
-void insert_to_free(struct damthread *th) {
-  // assert(free_list);
+void push_to_free(struct u_thread *th) {
+  assert(free_list);
+  th->handle = 0;
   th->next = free_list->next;
-  free_list->head = th;
+  free_list = th;
 }
 
-void thr_enqueue(struct damthread *th) {
-  if (thr_q->head == NULL) {
-    thr_q->head = thr_q->tail = th;
-    thr_q->head->next = thr_q->tail->next = NULL;
+void ready_enqueue(struct u_thread *th) { // make it circular
+  if (ready_q->head == NULL) {
+    ready_q->head = ready_q->tail = th->next = th;
   } else {
-    thr_q->tail->next = th;
-    th->next = NULL;
-    thr_q->tail = th;
+    ready_q->tail->next = th;
+    th->next = ready_q->head;
+    ready_q->tail = th;
   }
 }
 
 // remove from head
-struct damthread *thr_dequeue() {
-  if (thr_q->head == NULL) {
+struct u_thread *ready_dequeue() {
+  if (ready_q->head == NULL) {
     fprintf(stderr, "Cannot dequeue from empty\n");
     return NULL;
   }
-  struct damthread *out = thr_q->head;
-  thr_q->head = thr_q->head->next;
+  struct u_thread *out = ready_q->head;
+  ready_q->head = ready_q->head->next;
   return out; // NOTE i am not calling free
 }
 
 void print_Q() {
-  if (!thr_q->head) {
+  if (!ready_q->head) {
     printf("Q empty\n");
     return;
   } else {
-    struct damthread *tmp = thr_q->head;
+    struct u_thread *tmp = ready_q->head;
     while (tmp != NULL) {
       printf("Thread %lu with arg: %d\n", tmp->id, *(int *)(tmp->args));
       tmp = tmp->next;
@@ -52,21 +53,25 @@ void print_Q() {
 /* frees the stack memory of threads that have exited */
 void empty_free() {
   assert(free_list);
-  struct damthread *tmp = free_list->head;
-  while (tmp) {
+  struct u_thread *tmp = free_list;
+  while (tmp->id != -1) {
+    free_list = free_list->next;
     free(tmp);
-    free_list->head = free_list->next;
-    tmp = free_list->head;
+    tmp = free_list;
   }
 }
 
-// returns 0 if not found
-struct damthread *thread_exists(unsigned tid) {
-  struct damthread *tmp = thr_q->head;
-  while (tmp) {
-    if (tmp->id == tid)
-      return tmp;
-    tmp = tmp->next;
-  }
-  return NULL;
+void push_to_join(struct u_thread *th) {
+  assert(join_list);
+  th->next = join_list->next;
+  join_list = th;
+}
+struct u_thread *pop_from_join() {
+  assert(join_list);
+  struct u_thread *tmp = join_list;
+  if (tmp->id != -1)
+    join_list = join_list->next;
+  else
+    printf("why did i try to pop empty joinlist?\n");
+  return tmp;
 }

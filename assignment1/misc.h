@@ -1,12 +1,11 @@
+void push_to_join(struct u_thread *th);
+// struct u_thread *pop_from_join(struct u_thread *jlist);
 
-struct damthread *thr_dequeue();
+struct u_thread *ready_dequeue();
 
-void thr_enqueue(struct damthread *th);
+void ready_enqueue(struct u_thread *th);
 
 void print_Q();
 
-void insert_to_free(struct damthread *th);
-
+void push_to_free(struct u_thread *th);
 void empty_free();
-
-struct damthread *thread_exists(unsigned tid);

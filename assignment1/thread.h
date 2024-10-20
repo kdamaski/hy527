@@ -7,27 +7,24 @@ void Thread_init(void);
 int Thread_new(int func(void *), void *args, size_t nbytes, ...);
 void Thread_exit(int code);
 int Thread_self(void);
-int Thread_join(unsigned tid);
+int Thread_join(unsigned long tid);
 void Thread_pause(void);
 
-struct damthread {
+// enum thr_queue { READYQ = 0, FREEQ };
+
+struct u_thread {
   unsigned long *sp;
   int (*pc)(void *);
   void *args;
   unsigned long id;
-  struct damthread *thr_joining; // threads that wait on me
-  // NOTE perhaps add a flag or pointer to show which Q thread is in
-  struct damthread *next;
+  struct u_thread *next;
+  struct u_thread *jlist; // a jlist for thread
+  char handle;            // instead of holding enum state
 };
 
-struct thread_queue {
-  struct damthread *head;
-  struct damthread *tail;
-};
-
-struct freelist {
-  struct damthread *head;
-  struct damthread *next;
+struct th_ready_q {
+  struct u_thread *head;
+  struct u_thread *tail;
 };
 
 #endif

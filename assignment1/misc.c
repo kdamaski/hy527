@@ -10,35 +10,37 @@ extern struct u_thread *join_list;
 extern unsigned n_threads;
 
 void push_to_free(struct u_thread *th) {
-  assert(free_list);
+  // assert(free_list);
   th->to_run = 0;
-  th->prev->next = th->next;
-  th->next->prev = th->prev;
+  // th->prev->next = th->next;
+  // th->next->prev = th->prev;
   th->next = free_list;
   free_list = th;
 }
 
 void ready_enqueue(struct u_thread *th) { // make it circular
   if (ready_q->head == NULL) {
-    ready_q->head = ready_q->tail = th->next = th->prev = th;
+    ready_q->head = ready_q->tail = th;
   } else {
     ready_q->tail->next = th;
-    th->prev = ready_q->tail;
-    th->next = ready_q->head;
+    // th->prev = ready_q->tail;
+    // th->next = ready_q->head;
+    th->next = ready_q->tail->next;
     ready_q->tail = th;
   }
+  ready_q->tail->next = NULL;
 }
 
 // remove from head
 struct u_thread *ready_dequeue() {
-  // if (ready_q->head == NULL) {
-  //   fprintf(stderr, "Cannot dequeue from empty\n");
-  //   return NULL;
-  // }
+  if (ready_q->head == NULL) {
+    fprintf(stderr, "Cannot dequeue from empty\n");
+    return NULL;
+  }
   struct u_thread *out = ready_q->head;
-  ready_q->tail->next = out->next; // could be head ofc
+  // ready_q->tail->next = out->next; // could be head ofc
   ready_q->head = ready_q->head->next;
-  ready_q->head->prev = ready_q->tail;
+  // ready_q->head->prev = ready_q->tail;
 
   return out; // NOTE i am not calling free
 }
@@ -50,9 +52,9 @@ void print_Q() {
   } else {
     struct u_thread *tmp = ready_q->head->next;
     printf("Thread %lu with arg: %d\n", ready_q->head->id,
-           *(int *)(ready_q->head->args));
+           *(int *)(ready_q->head->sp[2]));
     while (tmp != ready_q->head) {
-      printf("Thread %lu with arg: %d\n", tmp->id, *(int *)(tmp->args));
+      printf("Thread %lu with arg: %d\n", tmp->id, *(int *)(tmp->sp[2]));
       tmp = tmp->next;
     }
   }
@@ -60,9 +62,9 @@ void print_Q() {
 
 /* frees the stack memory of threads that have exited */
 void empty_free() {
-  assert(free_list);
+  // assert(free_list);
   struct u_thread *tmp = free_list;
-  while (tmp->id != -1) {
+  while (tmp) {
     free_list = free_list->next;
     free(tmp);
     tmp = free_list;
@@ -70,21 +72,20 @@ void empty_free() {
 }
 
 void push_to_join(struct u_thread *th) {
-  assert(join_list);
-  // change next ptr of thread to the joinlist next
-  th->prev->next = th->next;
-  th->next->prev = th->prev;
-  th->next = join_list->next;
-  join_list = th;
+  // head awaits for me
+  struct u_thread *newj = ready_dequeue();
+  if (th->jlist)
+    newj->next = th->jlist->next;
+  else
+    newj->next = NULL;
+  th->jlist = newj;
 }
 
 // never used
 struct u_thread *pop_from_join() {
-  assert(join_list);
+  // assert(join_list);
   struct u_thread *tmp = join_list;
-  if (tmp->id != -1)
+  if (tmp)
     join_list = join_list->next;
-  else
-    printf("why did i try to pop empty joinlist?\n");
   return tmp;
 }

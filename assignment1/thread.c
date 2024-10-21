@@ -36,12 +36,12 @@ void Thread_init(void) {
   n_threads = 0;
   // allocate the stack size for my user-level threads
   stack_size = 16 * KB;
-  free_list = malloc(sizeof(struct u_thread));
-  // guard node for free list
-  free_list->id = -1;
-  join_list = malloc(sizeof(struct u_thread));
-  assert(join_list);
-  join_list->id = -1;
+  // free_list = malloc(sizeof(struct u_thread));
+  // // guard node for free list
+  // free_list->id = -1;
+  // join_list = malloc(sizeof(struct u_thread));
+  // assert(join_list);
+  // join_list->id = -1;
 }
 
 int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
@@ -56,13 +56,11 @@ int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
     exit(1);
   }
   // those 2 fields seem meaningless but i need them for testing
-  new_thr->pc = func;
-  new_thr->args = args;
+  // new_thr->pc = func;
+  // new_thr->args = args;
   // leave space (nbytes) under the stack pointer for args value
   new_thr->sp =
       (unsigned long *)((void *)new_thr + stack_size + sizeof(struct u_thread));
-  // copy the args into the bottom of the allocated stack
-  memcpy((void *)new_thr->sp, args, nbytes);
 
   // Place _thrstart in the return address of our thread stack
   --new_thr->sp;
@@ -70,11 +68,14 @@ int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
   // now allocate 4 words for the general purpose registers that are saved
   new_thr->sp -= 4;
   new_thr->sp[1] = (unsigned long)func; // Those 2 args are for context restore
-  new_thr->sp[2] = (unsigned long)args; // in the order of the given swtch.s
+  // copy the args into the bottom of the allocated stack
+  new_thr->sp[2] =
+      (unsigned long)memcpy((void *)new_thr->sp, args,
+                            nbytes); // in the order of the given swtch.s
 
   // init queue state
   new_thr->to_run = 1; // mark thread initialized
-  new_thr->next = new_thr->jlist = new_thr->prev = NULL;
+  new_thr->next = new_thr->jlist = /*  new_thr->prev = */ NULL;
 
   // if Join called thread_new then do not add thread to ready_q. Not
   // implementing this...
@@ -99,9 +100,10 @@ void Thread_exit(int code) {
     // resume threads waiting for current's termination
     struct u_thread *tmp = ready_q->head->jlist;
     if (tmp) {
-      while (tmp) {
+      while (tmp) { // enQ threads waiting on me
         ready_enqueue(tmp);
         tmp = tmp->next;
+        ++n_threads;
       }
     }
     if (--n_threads == 0) {
@@ -117,6 +119,18 @@ void Thread_exit(int code) {
   }
 }
 
+void restore_context() {
+  // switch esp to the last thread available
+  asm volatile("movl  %0,%%esp\n\t" ::"r"(ready_q->head->sp));
+
+  asm volatile("movl  0(%esp),%ebx\n\t"
+               "movl 4(%esp),%esi\n\t"
+               "movl  8(%esp),%edi\n\t"
+               "movl  12(%esp),%ebp\n\t"
+               "addl  $16, %esp\n\t"
+               "ret\n\t");
+}
+
 /* Thread_pause is called by the currently running thread */
 void Thread_pause(void) {
   assert(ready_q->head);
@@ -128,15 +142,7 @@ void Thread_pause(void) {
     _swtch(from, to);
   } else {
     // last thread to finish!!
-    // switch esp to the last thread available
-    asm volatile("movl	%0,%%esp\n\t" ::"r"(ready_q->head->sp));
-
-    asm volatile("movl	0(%esp),%ebx\n\t"
-                 "movl	4(%esp),%esi\n\t"
-                 "movl	8(%esp),%edi\n\t"
-                 "movl	12(%esp),%ebp\n\t"
-                 "addl	$16, %esp\n\t"
-                 "ret\n\t");
+    restore_context(); // Enters
   }
 }
 
@@ -151,9 +157,9 @@ int Thread_join(unsigned long tid) {
       return -1;
     } // NOTE th_to_join did not get removed from ready_q necessarily
 
-    ready_q->head->jlist = th_to_join;
     push_to_join(th_to_join);
     // NOTE this is trial
+    Thread_pause();
     return tid;
   } else {
     join_0_called = 1;
@@ -207,14 +213,7 @@ int schedule() { // basically main calls this
     asm volatile("movl  %%ebp,[main_ebp]\n\t" ::"r"(main_ebp));
     // printf("ebp (schedule() bp) that i saved has value=%p\n", main_ebp);
 
-    asm volatile("movl	%0,%%esp\n\t" ::"r"(ready_q->head->sp));
-
-    asm volatile("movl	0(%esp),%ebx\n\t"
-                 "movl	4(%esp),%esi\n\t"
-                 "movl	8(%esp),%edi\n\t"
-                 "movl	12(%esp),%ebp\n\t"
-                 "addl	$16, %esp\n\t"
-                 "ret\n\t");
+    restore_context();
     return 0;
   } else {
     printf("Cannot run empty Q\n");
@@ -227,8 +226,8 @@ int main() {
   Thread_init();
   int thid1 = Thread_new(mytestfunc, (void *)&arg1, sizeof(int), NULL);
   int thid2 = Thread_new(mytestfunc, (void *)&arg2, sizeof(int), NULL);
-  // int thid3 = Thread_new(myjointestfunc, (void *)&arg3, sizeof(int), NULL);
-  int thid3 = Thread_new(mytestfunc, (void *)&arg3, sizeof(int), NULL);
+  int thid3 = Thread_new(myjointestfunc, (void *)&arg3, sizeof(int), NULL);
+  // int thid3 = Thread_new(mytestfunc, (void *)&arg3, sizeof(int), NULL);
   schedule(); // runs the first thread
   // Thread_join(0); // Join is bugged
   printf("Returned to main successfully\n");

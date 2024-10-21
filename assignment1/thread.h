@@ -14,11 +14,11 @@ void Thread_pause(void);
 
 struct u_thread {
   unsigned long *sp;
-  int (*pc)(void *);
-  void *args;
+  // int (*pc)(void *);
+  // void *args;
   unsigned long id;
   struct u_thread *next;
-  struct u_thread *prev;
+  // struct u_thread *prev;
   struct u_thread *jlist; // a jlist for thread
   char to_run;            // i mainly care for free or artive
 };

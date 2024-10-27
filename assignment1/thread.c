@@ -10,38 +10,35 @@
 unsigned stack_size;
 unsigned n_threads;
 
-unsigned long *main_esp;
-unsigned long *main_ebp;
-
 extern void _swtch(void *from, void *to);
 extern void _thrstart(void *arg, int func(void *));
 
 struct th_ready_q *ready_q = NULL;
 
-struct u_thread *join0_thread = NULL; // Running thread. Do not need it
+struct u_thread *join0_thread = NULL;
+
+struct u_thread *curr_thr = NULL;
+struct u_thread *main_thr = NULL;
 
 struct u_thread *free_list = NULL;
-
-struct u_thread *join_list = NULL;
 
 void Thread_init(void) {
   if (ready_q != NULL) {
     fprintf(stderr, "Thread_init has already been called\n");
     return;
   }
+
   ready_q = (struct th_ready_q *)malloc(sizeof(struct th_ready_q));
   assert(ready_q);
   ready_q->head = ready_q->tail = NULL;
-
-  n_threads = 0;
   // allocate the stack size for my user-level threads
   stack_size = 16 * KB;
-  // free_list = malloc(sizeof(struct u_thread));
-  // // guard node for free list
-  // free_list->id = -1;
-  // join_list = malloc(sizeof(struct u_thread));
-  // assert(join_list);
-  // join_list->id = -1;
+
+  main_thr = malloc(sizeof(struct u_thread));
+  main_thr->id = 0;
+
+  curr_thr = main_thr;
+  n_threads = 1;
 }
 
 int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
@@ -55,10 +52,7 @@ int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
     fprintf(stderr, "memory allocation failed for thread stack\n");
     exit(1);
   }
-  // those 2 fields seem meaningless but i need them for testing
-  // new_thr->pc = func;
-  // new_thr->args = args;
-  // leave space (nbytes) under the stack pointer for args value
+
   new_thr->sp =
       (unsigned long *)((void *)new_thr + stack_size + sizeof(struct u_thread));
 
@@ -85,12 +79,12 @@ int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
   return (new_thr->id = (unsigned long)new_thr);
 }
 
-int Thread_self(void) { return (unsigned)ready_q->head->id; }
+int Thread_self(void) { return (unsigned)curr_thr->id; }
 
 // ready_enqueue assumes that the Thread_init has been called
 // Thread_exit is called by __thrstart routine in assmbly
 void Thread_exit(int code) {
-  assert(ready_q->head);
+  assert(curr_thr);
   switch (code) {
   case 0:
   case 1:
@@ -98,58 +92,42 @@ void Thread_exit(int code) {
   default:
     empty_free();
     // resume threads waiting for current's termination
-    struct u_thread *tmp = ready_q->head->jlist;
+    struct u_thread *tmp = curr_thr->jlist;
     if (tmp) {
       while (tmp) { // enQ threads waiting on me
         ready_enqueue(tmp);
         tmp = tmp->next;
-        ++n_threads;
+        // ++n_threads;
       }
     }
-    if (--n_threads == 0) {
-      // restore esp and ebp of main
-      asm volatile("movl  %0,%%esp\n\t" ::"r"(main_esp));
-      asm volatile("movl  %0,%%ebp\n\t" ::"r"(main_ebp));
-      return;
-      // exit(0);
+    --n_threads;
+    if (n_threads == 0) {
+      printf("n_threads == 0. Exiting\n");
+      exit(0);
     } else {
-      Thread_pause();
+      void *from = curr_thr;
+      curr_thr = ready_dequeue();
+      _swtch(from, curr_thr);
     }
-    push_to_free(ready_dequeue()); // put it in the free list
+    push_to_free(curr_thr);
+    curr_thr = ready_dequeue();
   }
-}
-
-void restore_context() {
-  // switch esp to the last thread available
-  asm volatile("movl  %0,%%esp\n\t" ::"r"(ready_q->head->sp));
-
-  asm volatile("movl  0(%esp),%ebx\n\t"
-               "movl 4(%esp),%esi\n\t"
-               "movl  8(%esp),%edi\n\t"
-               "movl  12(%esp),%ebp\n\t"
-               "addl  $16, %esp\n\t"
-               "ret\n\t");
 }
 
 /* Thread_pause is called by the currently running thread */
 void Thread_pause(void) {
-  assert(ready_q->head);
-  // extract from and to *sp values and call _swtch
-  if (n_threads > 1) {
-    void *from = ready_q->head;
-    void *to = ready_q->head = ready_q->head->next;
-    ready_enqueue(ready_dequeue()); // from goes last and to comes front
-    _swtch(from, to);
-  } else {
-    // last thread to finish!!
-    restore_context(); // Enters
-  }
+  assert(curr_thr);
+  assert(n_threads > 1);
+  ready_enqueue(curr_thr);
+  void *from = curr_thr;
+  void *to = curr_thr = ready_dequeue();
+  _swtch(from, to);
 }
 
 char join_0_called = 0;
 
 int Thread_join(unsigned long tid) {
-  assert(ready_q->head && ready_q->head->id != tid && !join_0_called);
+  assert(curr_thr && curr_thr->id != tid && !join_0_called);
   struct u_thread *th_to_join = (struct u_thread *)tid;
   if (tid != 0) {                  // tid is also the address of the thread
     if (th_to_join->to_run == 0) { // if it is put in free list
@@ -157,15 +135,23 @@ int Thread_join(unsigned long tid) {
       return -1;
     } // NOTE th_to_join did not get removed from ready_q necessarily
 
-    push_to_join(th_to_join);
-    // NOTE this is trial
-    Thread_pause();
+    void *from = curr_thr;
+    push_to_join(th_to_join); // pushes curr_thr into tid's wait_Q
+    curr_thr = ready_dequeue();
+    --n_threads;
+    if (curr_thr == main_thr) {
+      ready_enqueue(curr_thr);
+      curr_thr = ready_dequeue();
+      assert(curr_thr != main_thr);
+    }
+    _swtch(from, curr_thr);
+
     return tid;
   } else {
     join_0_called = 1;
     // wait for all threads
     if (n_threads > 1) {
-      join0_thread = ready_q->head;
+      join0_thread = curr_thr;
       Thread_pause();
     }
     return 0;
@@ -174,12 +160,11 @@ int Thread_join(unsigned long tid) {
 
 int mytestfunc(void *args) {
   int arg = *(int *)args;
-  printf("Thread %lu is running with arg=%d\n", ready_q->head->id, arg);
+  printf("Thread %lu is running with arg=%d\n", curr_thr->id, arg);
   for (int i = 0; i < 250000; ++i) {
     ++arg;
   }
-  printf("Thread %lu spinned 25k times into ++arg=%d\n", ready_q->head->id,
-         arg);
+  printf("Thread %lu spinned 25k times into ++arg=%d\n", curr_thr->id, arg);
   return Thread_self();
 }
 
@@ -188,37 +173,13 @@ int myjointestfunc(void *args) {
   int arg1 = arg + 1000;
   printf("Thread %lu is running with arg=%d and will create a thread with "
          "arg=%d and join it\n",
-         ready_q->head->id, arg, arg1);
+         curr_thr->id, arg, arg1);
 
   Thread_join(Thread_new(mytestfunc, (void *)(&arg1), sizeof(int), NULL));
 
   printf("Thread %lu returned after calling join on thread with arg=%d\n",
-         ready_q->head->id, arg1);
+         curr_thr->id, arg1);
   return Thread_self();
-}
-
-char thr_started = 0;
-int schedule() { // basically main calls this
-  assert(ready_q->head);
-  if (thr_started) {
-    printf("Already scheduled\n");
-    return 1;
-  }
-  if (ready_q->head) {
-    thr_started = 1;
-
-    // save process (schedule func's) esp and ebp in globals
-    asm volatile("movl  %%esp,[main_esp]\n\t" ::"r"(main_esp));
-    // printf("Esp (schedule() sp) that i saved has value=%p\n", main_esp);
-    asm volatile("movl  %%ebp,[main_ebp]\n\t" ::"r"(main_ebp));
-    // printf("ebp (schedule() bp) that i saved has value=%p\n", main_ebp);
-
-    restore_context();
-    return 0;
-  } else {
-    printf("Cannot run empty Q\n");
-    return -1;
-  }
 }
 
 int main() {
@@ -228,7 +189,7 @@ int main() {
   int thid2 = Thread_new(mytestfunc, (void *)&arg2, sizeof(int), NULL);
   int thid3 = Thread_new(myjointestfunc, (void *)&arg3, sizeof(int), NULL);
   // int thid3 = Thread_new(mytestfunc, (void *)&arg3, sizeof(int), NULL);
-  schedule(); // runs the first thread
+  Thread_pause();
   // Thread_join(0); // Join is bugged
   printf("Returned to main successfully\n");
 }

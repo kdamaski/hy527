@@ -9,3 +9,5 @@ void print_Q();
 
 void push_to_free(struct u_thread *th);
 void empty_free();
+
+void restore_context();

@@ -6,8 +6,12 @@
 
 extern struct th_ready_q *ready_q;
 extern struct u_thread *free_list;
-extern struct u_thread *join_list;
+extern struct u_thread *join0_thread;
+extern struct u_thread *curr_thr;
 extern unsigned n_threads;
+
+extern unsigned long *main_esp;
+extern unsigned long *main_ebp;
 
 void push_to_free(struct u_thread *th) {
   // assert(free_list);
@@ -25,7 +29,6 @@ void ready_enqueue(struct u_thread *th) { // make it circular
     ready_q->tail->next = th;
     // th->prev = ready_q->tail;
     // th->next = ready_q->head;
-    th->next = ready_q->tail->next;
     ready_q->tail = th;
   }
   ready_q->tail->next = NULL;
@@ -42,19 +45,19 @@ struct u_thread *ready_dequeue() {
   ready_q->head = ready_q->head->next;
   // ready_q->head->prev = ready_q->tail;
 
-  return out; // NOTE i am not calling free
+  return out;
 }
 
 void print_Q() {
+  assert(curr_thr);
+  printf("Current thread running is %p\n", curr_thr);
   if (!ready_q->head) {
     printf("Q empty\n");
     return;
   } else {
-    struct u_thread *tmp = ready_q->head->next;
-    printf("Thread %lu with arg: %d\n", ready_q->head->id,
-           *(int *)(ready_q->head->sp[2]));
-    while (tmp != ready_q->head) {
-      printf("Thread %lu with arg: %d\n", tmp->id, *(int *)(tmp->sp[2]));
+    struct u_thread *tmp = ready_q->head;
+    while (tmp) {
+      printf("Thread %p is in ready_q\n", tmp);
       tmp = tmp->next;
     }
   }
@@ -72,20 +75,38 @@ void empty_free() {
 }
 
 void push_to_join(struct u_thread *th) {
-  // head awaits for me
-  struct u_thread *newj = ready_dequeue();
   if (th->jlist)
-    newj->next = th->jlist->next;
+    curr_thr->next = th->jlist->next;
   else
-    newj->next = NULL;
-  th->jlist = newj;
+    curr_thr->next = NULL;
+  th->jlist = curr_thr;
 }
 
 // never used
 struct u_thread *pop_from_join() {
-  // assert(join_list);
-  struct u_thread *tmp = join_list;
+  // assert(join0_thread);
+  struct u_thread *tmp = join0_thread;
   if (tmp)
-    join_list = join_list->next;
+    join0_thread = join0_thread->next;
   return tmp;
+}
+
+void restore_context() {
+  // curr_thr->sp = main_esp;
+  // switch esp to the last thread available
+  // asm volatile("movl [main_esp],%%esp\n\t" ::"r"(main_esp));
+  // asm volatile("movl [main_ebp],%%ebp\n\t" ::"r"(main_ebp));
+  // asm volatile("movl  4(%esp),%ebp\n\t"
+  //              "ret\n\t");
+
+  // akyro to apo katw?
+  // asm volatile("movl  %0,%%esp\n\t" ::"r"(curr_thr->sp));
+
+  // asm volatile("movl  %0,%%esp\n\t" ::"r"(curr_thr->sp));
+  // asm volatile("movl  0(%esp),%ebx\n\t"
+  //              "movl  4(%esp),%esi\n\t"
+  //              "movl  8(%esp),%edi\n\t"
+  //              "movl  12(%esp),%ebp\n\t"
+  //              "addl  $16, %esp\n\t"
+  //              "ret\n\t");
 }

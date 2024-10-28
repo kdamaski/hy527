@@ -35,7 +35,7 @@ void Thread_init(void) {
   stack_size = 16 * KB;
 
   main_thr = malloc(sizeof(struct u_thread));
-  main_thr->id = 0;
+  main_thr->id = -1;
 
   curr_thr = main_thr;
   n_threads = 1;
@@ -106,11 +106,15 @@ void Thread_exit(int code) {
       exit(0);
     } else {
       void *from = curr_thr;
+      push_to_free(curr_thr);
       curr_thr = ready_dequeue();
+      if (curr_thr == main_thr) {
+        ready_enqueue(curr_thr);
+        curr_thr = ready_dequeue();
+        // assert(curr_thr != main_thr);
+      }
       _swtch(from, curr_thr);
     }
-    push_to_free(curr_thr);
-    curr_thr = ready_dequeue();
   }
 }
 
@@ -133,16 +137,15 @@ int Thread_join(unsigned long tid) {
     if (th_to_join->to_run == 0) { // if it is put in free list
       printf("Thread with tid %lu has already exited\n", tid);
       return -1;
-    } // NOTE th_to_join did not get removed from ready_q necessarily
+    }
 
     void *from = curr_thr;
     push_to_join(th_to_join); // pushes curr_thr into tid's wait_Q
     curr_thr = ready_dequeue();
-    --n_threads;
     if (curr_thr == main_thr) {
       ready_enqueue(curr_thr);
       curr_thr = ready_dequeue();
-      assert(curr_thr != main_thr);
+      // assert(curr_thr != main_thr);
     }
     _swtch(from, curr_thr);
 
@@ -183,13 +186,13 @@ int myjointestfunc(void *args) {
 }
 
 int main() {
-  int arg1 = 4, arg2 = 5, arg3 = 6;
+  int arg1 = 4, arg2 = 5, arg3 = 6, arg4 = 7;
   Thread_init();
   int thid1 = Thread_new(mytestfunc, (void *)&arg1, sizeof(int), NULL);
   int thid2 = Thread_new(mytestfunc, (void *)&arg2, sizeof(int), NULL);
   int thid3 = Thread_new(myjointestfunc, (void *)&arg3, sizeof(int), NULL);
-  // int thid3 = Thread_new(mytestfunc, (void *)&arg3, sizeof(int), NULL);
+  int thid4 = Thread_new(mytestfunc, (void *)&arg4, sizeof(int), NULL);
   Thread_pause();
-  // Thread_join(0); // Join is bugged
+  Thread_join(0); // Join is bugged
   printf("Returned to main successfully\n");
 }

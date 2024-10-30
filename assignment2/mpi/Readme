@@ -1,0 +1,28 @@
+General setup
+=======================
+
+First time setup your ssh public keys, to login to the nodes without password.
+  ssh-keygen -t dsa
+  into .ssh directory make: cat id_dsa.pub > authorized_keys2
+Also it is recommended to login once to each node that you will use with mpi.
+
+Copy all files from /home1/cs527/mpi to your account.
+Login to one of the mpi nodes.
+Inspect the files. 
+Compile the application (with mpicc compiler)
+
+Configure MPI for your account:
+-Create on your home directory a file with name .mpd.conf which contains:
+secretword=XXXXX, when XXXXX a secret key of your choice.
+
+-Start mpd deamons at the cluster nodes, executing the following command:
+mpdboot -n 8 -f mpd.hosts
+After this command, mpdtrace should print all the 8 nodes piranha73-piranha80.
+When you finish running your mpi programs, you can kill the created mpi deamons
+using the command: mpdallexit.
+
+To run an mpi application:
+ To compile an application you should use the mpicc compiler.
+ To run it, use the command: mpirun -np N APPL,
+     where: N the number of processors,
+            and APPL the compiled program, described from it's full path.

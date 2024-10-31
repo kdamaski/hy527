@@ -6,7 +6,7 @@ CFLAGS = -Wall -fno-inline -O2
 mmul:	mmul.c 
 	$(CC) $(CFLAGS) -o $@  $< $(LIBS)
 
-mmul.c: myparaller.C4 $(MACROS)
+mmul.c: matmul.C4 $(MACROS)
 	m4 $(MACROS) $< > $@
 
 clean:

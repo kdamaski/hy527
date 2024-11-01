@@ -1,6 +1,35 @@
-MAIN_ENV /* standard libraries structs and functions */
+MAIN_ENV /* standard libraries structs, functions, macros (e.g MAX_THREADS 8) */
 #include "init.h"
+#define N 100
+#define DEFAULT_P 1
+
+double A[N][N], B[N][N];
+
+int P = DEFAULT_P;
+
+unsigned int start;
 
 int main(int argc, char *argv[]) {
+  init_matrices("matrixfile", A, B, N);
+  
+  MAIN_INITENV(); // inits locks and barriers
+
+  int c;
+  while ((c = getopt(argc, argv, "p")) != -1) {
+    switch(c) {
+      case 'p': P = atoi(optarg); 
+        if (P < 1 || P > 8) {
+          fprintf(stderr, "P must be >= 1 and <= 8\n");
+          exit(-1);
+        }
+        break;  
+      default:
+        break;
+    }
+  for (int i=1; i<P; i++) {
+    CREATE(SlaveStart); // calls pthread_create and does ++thread_count
+  }
+  CLOCK(start);
+
   return 0;
 }

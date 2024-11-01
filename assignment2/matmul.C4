@@ -1,2 +1,6 @@
 MAIN_ENV /* standard libraries structs and functions */
+#include "init.h"
 
+int main(int argc, char *argv[]) {
+  return 0;
+}

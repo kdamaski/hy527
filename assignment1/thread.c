@@ -105,6 +105,7 @@ void Thread_exit(int code) {
       printf("n_threads == 0. Exiting\n");
       exit(0);
     } else {
+      printf("Thread %lu is exiting with code %d\n", curr_thr->id, code);
       void *from = curr_thr;
       push_to_free(curr_thr);
       curr_thr = ready_dequeue();
@@ -121,7 +122,7 @@ void Thread_exit(int code) {
 /* Thread_pause is called by the currently running thread */
 void Thread_pause(void) {
   assert(curr_thr);
-  assert(n_threads > 1);
+  // assert(n_threads > 1);
   ready_enqueue(curr_thr);
   void *from = curr_thr;
   void *to = curr_thr = ready_dequeue();
@@ -131,7 +132,7 @@ void Thread_pause(void) {
 char join_0_called = 0;
 
 int Thread_join(unsigned long tid) {
-  assert(curr_thr && curr_thr->id != tid && !join_0_called);
+  // assert(curr_thr && curr_thr->id != tid && !join_0_called);
   struct u_thread *th_to_join = (struct u_thread *)tid;
   if (tid != 0) {                  // tid is also the address of the thread
     if (th_to_join->to_run == 0) { // if it is put in free list
@@ -192,7 +193,7 @@ int main() {
   int thid2 = Thread_new(mytestfunc, (void *)&arg2, sizeof(int), NULL);
   int thid3 = Thread_new(myjointestfunc, (void *)&arg3, sizeof(int), NULL);
   int thid4 = Thread_new(mytestfunc, (void *)&arg4, sizeof(int), NULL);
-  Thread_pause();
-  Thread_join(0); // Join is bugged
+  Thread_join(0);
+  // Thread_pause();
   printf("Returned to main successfully\n");
 }

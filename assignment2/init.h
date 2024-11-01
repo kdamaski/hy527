@@ -2,4 +2,4 @@
 
 /* read lines from file f where a single element is in a single line and create
  * a NxN matrix */
-int read_input(FILE f);
+void init_matrices(char *fname, double *A, double *B, int N);

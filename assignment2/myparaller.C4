@@ -99,7 +99,6 @@ int main(int argc, char *argv[]) {
                 printf("Default: kostas-parallel -m%1d -p%1d -n%1d -l%1d\n",
                        DEFAULT_M,DEFAULT_P,NUM_CACHE_LINES,LOG2_LINE_SIZE);
 		exit(0);
-	        break;
     }
   }
 

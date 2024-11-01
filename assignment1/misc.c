@@ -90,23 +90,3 @@ struct u_thread *pop_from_join() {
     join0_thread = join0_thread->next;
   return tmp;
 }
-
-void restore_context() {
-  // curr_thr->sp = main_esp;
-  // switch esp to the last thread available
-  // asm volatile("movl [main_esp],%%esp\n\t" ::"r"(main_esp));
-  // asm volatile("movl [main_ebp],%%ebp\n\t" ::"r"(main_ebp));
-  // asm volatile("movl  4(%esp),%ebp\n\t"
-  //              "ret\n\t");
-
-  // akyro to apo katw?
-  // asm volatile("movl  %0,%%esp\n\t" ::"r"(curr_thr->sp));
-
-  // asm volatile("movl  %0,%%esp\n\t" ::"r"(curr_thr->sp));
-  // asm volatile("movl  0(%esp),%ebx\n\t"
-  //              "movl  4(%esp),%esi\n\t"
-  //              "movl  8(%esp),%edi\n\t"
-  //              "movl  12(%esp),%ebp\n\t"
-  //              "addl  $16, %esp\n\t"
-  //              "ret\n\t");
-}

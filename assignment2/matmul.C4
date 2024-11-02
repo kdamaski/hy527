@@ -1,13 +1,19 @@
 MAIN_ENV /* standard libraries structs, functions, macros (e.g MAX_THREADS 8) */
-#include "init.h"
-#define N 100
+#include <assert.h>
+#define N 10
 #define DEFAULT_P 1
 
 double A[N][N], B[N][N];
 
 int P = DEFAULT_P;
 
-unsigned int start;
+unsigned int start, finish;
+
+void init_matrices(char *fname, double A[N][N], double B[N][N], int dim);
+
+void *matrix_multiplication(void*);
+
+BARDEC(mul_barrier) // declare a barrier
 
 int main(int argc, char *argv[]) {
   init_matrices("matrixfile", A, B, N);
@@ -15,10 +21,10 @@ int main(int argc, char *argv[]) {
   MAIN_INITENV(); // inits locks and barriers
 
   int c;
-  while ((c = getopt(argc, argv, "p")) != -1) {
+  while ((c = getopt(argc, argv, "p:")) != -1) {
     switch(c) {
       case 'p': P = atoi(optarg); 
-        if (P < 1 || P > 8) {
+        if (P < 1 || P > MAX_THREADS) {
           fprintf(stderr, "P must be >= 1 and <= 8\n");
           exit(-1);
         }
@@ -26,10 +32,41 @@ int main(int argc, char *argv[]) {
       default:
         break;
     }
-  for (int i=1; i<P; i++) {
-    CREATE(SlaveStart); // calls pthread_create and does ++thread_count
   }
-  CLOCK(start);
-
+  CLOCK(start)
+  BARINIT(mul_barrier)
+  for (int i=0; i < P; i++) {
+    CREATE(matrix_multiplication(NULL))
+  }
+  BARRIER(mul_barrier , P);
+  printf("Clock count total time of %u for the whole program\n",finish - start);
+  MAIN_END
+  CLOCK(finish)
   return 0;
+}
+
+
+void init_matrices(char *fname, double A[N][N], double B[N][N], int dim) {
+  assert(fname);
+  FILE *f = fopen(fname, "r");
+  assert(f);
+  for (int i = 0; i < dim; ++i) {
+    for (int j = 0; j < dim; ++j) {
+      fscanf(f, "%lf\n", &A[i][j]);
+    }
+  }
+  for (int i = 0; i < dim; ++i) {
+    for (int j = 0; j < dim; ++j) {
+      fscanf(f, "%lf\n", &B[i][j]);
+    }
+  }
+}
+
+void *matrix_multiplication(void *args) {
+  unsigned tid, t_first_i, t_last_i, starttime, finishtime;
+  CLOCK(starttime)
+  GET_PID(tid) // gets thread identifier (0 to P - 1)
+  CLOCK(finishtime)
+  printf("Clock count total time %u for thread %u\n",finishtime - starttime, tid);
+  return NULL;
 }

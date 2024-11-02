@@ -10,5 +10,4 @@ mmul.c: matmul.C4 $(MACROS)
 	m4 $(MACROS) $< > $@
 
 clean:
-	rm -f mmul mmul.c
-
+	rm -f mmul mmul.c a.out

@@ -14,7 +14,7 @@ int N = DEFAULT_N;
 
 unsigned start, finish;
 
-void init_matrices(char *fname, double A[N][N], double B[N][N], int dim);
+void init_matrices(char *fname, double A[N*N], double B[N*N], int dim);
 
 void *matrix_multiplication(void*);
 
@@ -23,7 +23,7 @@ BARDEC(mul_barrier)
 unsigned array_size;
 unsigned elems_per_thread;
 
-double A[DEFAULT_N][DEFAULT_N], B[DEFAULT_N][DEFAULT_N], C[DEFAULT_N][DEFAULT_N];
+double A[DEFAULT_N*DEFAULT_N], B[DEFAULT_N*DEFAULT_N], C[DEFAULT_N*DEFAULT_N];
 
 int main(int argc, char *argv[]) {
 
@@ -37,7 +37,6 @@ int main(int argc, char *argv[]) {
           fprintf(stderr, "N must be >= 10 and <= DEFAULT_N\n");
           exit(-1);
         }
-        array_size = N*N;
         break;  
       case 'p': P = atoi(optarg); 
         if (P < 1 || P > MAX_THREADS) {
@@ -49,6 +48,8 @@ int main(int argc, char *argv[]) {
         break;
     }
   }
+
+  array_size = N*N;
   elems_per_thread = array_size / P;
 
   // assert((elems_per_thread % P) == 0); // assume there is no remainder
@@ -75,33 +76,29 @@ int main(int argc, char *argv[]) {
   printf("Clock count total time of %u for the whole program\n",finish - start);
 
   // print C for small N
-  if (N < 100) {
-    printf("Since N <= 100 i will print the outcome\n");
-    for (int i = 0; i < N; ++i) {
-      for (int j = 0; j < N; ++j) {
-        printf("%lf\n", C[i][j]);
-      }
-    }
+  FILE *outf = fopen("matrix_multiplied", "w");
+  assert(outf);
+  printf("Writing output to file: matrix_multiplied\n");
+  for (int i = 0; i < array_size; ++i) {
+    fprintf(outf, "%lf\n", C[i]);
   }
+  fclose(outf);
   //
   return 0;
 }
 
 
-void init_matrices(char *fname, double A[N][N], double B[N][N], int dim) {
+void init_matrices(char *fname, double A[N*N], double B[N*N], int dim) {
   assert(fname);
   FILE *f = fopen(fname, "r");
   assert(f);
-  for (int i = 0; i < dim; ++i) {
-    for (int j = 0; j < dim; ++j) {
-      fscanf(f, "%lf\n", &A[i][j]);
-    }
+  for (unsigned i = 0; i < array_size; ++i) {
+    fscanf(f, "%lf\n", &A[i]);
   }
-  for (int i = 0; i < dim; ++i) {
-    for (int j = 0; j < dim; ++j) {
-      fscanf(f, "%lf\n", &B[i][j]);
-    }
+  for (unsigned i = 0; i < array_size; ++i) {
+    fscanf(f, "%lf\n", &B[i]);
   }
+  fclose(f);
 }
 
 void *matrix_multiplication(void *args) {
@@ -110,13 +107,11 @@ void *matrix_multiplication(void *args) {
   struct thread_data curr_thr = *(struct thread_data*)args;
 
   CLOCK(starttime)
-  for(int i = curr_thr.t_first_i; i < curr_thr.t_last_i; ++i) {
-    int row = i / N;
-    int col = i % N;
-    C[row][col] = A[row][col] * B[row][col];
+  for(unsigned i = curr_thr.t_first_i; i < curr_thr.t_last_i; ++i) {
+    C[i] = A[i] * B[i];
   }
   CLOCK(finishtime)
+  printf("Thread %u spent total time %u\n",curr_thr.tid, finishtime - starttime);
   BARRIER(mul_barrier, P+1)
-  printf("Thread %u spent total time %u (with barrier_wait)\n",curr_thr.tid, finishtime - starttime);
   MAIN_END
 }

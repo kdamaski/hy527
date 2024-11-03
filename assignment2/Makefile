@@ -1,7 +1,7 @@
 MACROS = ./sas/macros/c.linux.m4
 LIBS = -lm -lpthread 
 CC = gcc
-CFLAGS = -Wall -fno-inline -O2 
+CFLAGS = -Wall -fno-inline -O2
 
 mmul:	mmul.c 
 	$(CC) $(CFLAGS) -o $@  $< $(LIBS)

@@ -1,28 +1,44 @@
 MAIN_ENV /* standard libraries structs, functions, macros (e.g MAX_THREADS 8) */
 #include <assert.h>
-#define N 10
+#define DEFAULT_N 2000
 #define DEFAULT_P 1
 
-double A[N][N], B[N][N];
+struct thread_data {
+  unsigned tid;
+  unsigned t_first_i;
+  unsigned t_last_i;
+};
 
 int P = DEFAULT_P;
+int N = DEFAULT_N;
 
-unsigned int start, finish;
+unsigned start, finish;
 
 void init_matrices(char *fname, double A[N][N], double B[N][N], int dim);
 
 void *matrix_multiplication(void*);
 
-BARDEC(mul_barrier) // declare a barrier
+BARDEC(mul_barrier)
+
+unsigned array_size;
+unsigned elems_per_thread;
+
+double A[DEFAULT_N][DEFAULT_N], B[DEFAULT_N][DEFAULT_N], C[DEFAULT_N][DEFAULT_N];
 
 int main(int argc, char *argv[]) {
-  init_matrices("matrixfile", A, B, N);
-  
-  MAIN_INITENV(); // inits locks and barriers
+
+  MAIN_INITENV() // inits locks and barriers
 
   int c;
-  while ((c = getopt(argc, argv, "p:")) != -1) {
+  while ((c = getopt(argc, argv, "p:n:")) != -1) {
     switch(c) {
+      case 'n': N = atoi(optarg); 
+        if (N < 10 || N > DEFAULT_N) {
+          fprintf(stderr, "N must be >= 10 and <= DEFAULT_N\n");
+          exit(-1);
+        }
+        array_size = N*N;
+        break;  
       case 'p': P = atoi(optarg); 
         if (P < 1 || P > MAX_THREADS) {
           fprintf(stderr, "P must be >= 1 and <= 8\n");
@@ -33,15 +49,41 @@ int main(int argc, char *argv[]) {
         break;
     }
   }
-  CLOCK(start)
+  elems_per_thread = array_size / P;
+
+  // assert((elems_per_thread % P) == 0); // assume there is no remainder
+
   BARINIT(mul_barrier)
-  for (int i=0; i < P; i++) {
-    CREATE(matrix_multiplication(NULL))
+  init_matrices("matrixfile", A, B, N);
+
+  struct thread_data thread_args[P];
+
+  CLOCK(start)
+  unsigned remainder = array_size % P;
+  for (int i=0; i<P; i++) {
+    thread_args[i].tid = i;
+    thread_args[i].t_first_i = i * elems_per_thread;
+    thread_args[i].t_last_i = ((i + 1) * elems_per_thread) - 1;
+    if (i == P - 1) {
+      thread_args[i].t_last_i += remainder;
+    }
+    pthread_create(&threads[i],NULL,matrix_multiplication,&thread_args[i]);
   }
-  BARRIER(mul_barrier , P);
-  printf("Clock count total time of %u for the whole program\n",finish - start);
-  MAIN_END
+  
+  BARRIER(mul_barrier, P+1)
   CLOCK(finish)
+  printf("Clock count total time of %u for the whole program\n",finish - start);
+
+  // print C for small N
+  if (N < 100) {
+    printf("Since N <= 100 i will print the outcome\n");
+    for (int i = 0; i < N; ++i) {
+      for (int j = 0; j < N; ++j) {
+        printf("%lf\n", C[i][j]);
+      }
+    }
+  }
+  //
   return 0;
 }
 
@@ -63,10 +105,18 @@ void init_matrices(char *fname, double A[N][N], double B[N][N], int dim) {
 }
 
 void *matrix_multiplication(void *args) {
-  unsigned tid, t_first_i, t_last_i, starttime, finishtime;
+  unsigned starttime, finishtime;
+
+  struct thread_data curr_thr = *(struct thread_data*)args;
+
   CLOCK(starttime)
-  GET_PID(tid) // gets thread identifier (0 to P - 1)
+  for(int i = curr_thr.t_first_i; i < curr_thr.t_last_i; ++i) {
+    int row = i / N;
+    int col = i % N;
+    C[row][col] = A[row][col] * B[row][col];
+  }
   CLOCK(finishtime)
-  printf("Clock count total time %u for thread %u\n",finishtime - starttime, tid);
-  return NULL;
+  BARRIER(mul_barrier, P+1)
+  printf("Thread %u spent total time %u (with barrier_wait)\n",curr_thr.tid, finishtime - starttime);
+  MAIN_END
 }

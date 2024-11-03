@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define DIM 2000
+
 double randfrom(double min, double max) {
   double range = (max - min);
   double div = RAND_MAX / range;
@@ -26,6 +28,6 @@ int create_matrix_file(int N, const char *fname) {
 }
 
 int main() {
-  create_matrix_file(1000, "matrixfile");
+  create_matrix_file(DIM, "matrixfile");
   return EXIT_SUCCESS;
 }

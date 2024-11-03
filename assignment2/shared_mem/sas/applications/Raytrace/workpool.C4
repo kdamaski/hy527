@@ -1,0 +1,403 @@
+/*************************************************************************/
+/*                                                                       */
+/*  Copyright (c) 1994 Stanford University                               */
+/*                                                                       */
+/*  All rights reserved.                                                 */
+/*                                                                       */
+/*  Permission is given to use, copy, and modify this software for any   */
+/*  non-commercial purpose as long as this copyright notice is not       */
+/*  removed.  All other uses, including redistribution in whole or in    */
+/*  part, are forbidden without prior written permission.                */
+/*                                                                       */
+/*  This software is provided with absolutely no warranty and no         */
+/*  support.                                                             */
+/*                                                                       */
+/*************************************************************************/
+
+/*
+ * NAME
+ *      workpool.c
+ *
+ * DESCRIPTION
+ *      This file contains the private data definitions and code for the ray
+ *      job work pool.  Each processor has its own workpool.
+ *
+ *      The workpool consists of a stack of pixel bundles.  Each bundle
+ *      contains jobs for primary rays for a contiguous 2D pixel screen
+ *      region.
+ *
+ */
+
+#include <stdio.h>
+#include <math.h>
+#include "rt.h"
+
+#ifdef SMP_STEAL
+#include "tls.h"    /*@@@ dongming: svm/nt specific */
+#endif
+
+int HALF_TASK_NUM = 32;
+
+#ifdef SMP_STEAL
+extern int numb_nodes, node_id, procs_per_node; /*@@@ dongming: svm/nt specific */
+#endif
+
+int 
+get_half_task_num()
+{
+  int temp, temp1, temp2, total;
+  int i;
+
+  temp = Display.xres / blockx / bundlex;
+  temp1 = Display.yres / blocky / bundley;
+  temp2 = blockx * blocky / gm->nprocs;
+  total = temp2 * temp1 * temp;
+  HALF_TASK_NUM = total * (1 - 0.5);
+  /* printf("HALF_TASK_NUM is %d\n", HALF_TASK_NUM); */
+  for (i = 0; i < gm->nprocs; i++) {
+    gm->workpool1[i] =
+      GlobalMalloc(sizeof(WPJOB) * HALF_TASK_NUM, "workpool.C");
+    gm->workpool2[i] =
+      GlobalMalloc(sizeof(WPJOB) * (total - HALF_TASK_NUM), "workpool.C");
+  }
+}
+
+/*
+ * NAME
+ *      PutJob - put another job into pid's work pool
+ *
+ * SYNOPSIS
+ *      VOID    PutJob(xs, ys, xe, ye, xbe, ybe, pid)
+ *      INT     xs,  ys;                // Start of block.
+ *      INT     xe,  ye;                // Extent of block.
+ *      INT     xbe, ybe;               // Extent of bundle.
+ *      INT     pid;                    // Process id.
+ *
+ *  DESCRIPTION
+ *      Given a block of image screen pixels, this routine generates pixel
+ *      bundle entries that are inserted into pid's work pool stack.
+ *
+ *      A block includes the starting pixel address, the block size in x and y
+ *      dimensions and the bundle size for making pixel jobs.
+ *
+ *      Pixel addresses are 0 relative.
+ *
+ *      Locking of workpools for job insertion is not required since a given
+ *      process only inserts into its own pool and since we use a BARRIER
+ *      before jobs can be removed from workpools.
+ *
+ * RETURNS
+ *      Nothing.
+ */
+
+VOID 
+PutJob(xs, ys, xe, ye, xbe, ybe, pid)
+     INT xs, ys;
+     INT xe, ye;
+     INT xbe, ybe;
+     INT pid;
+{
+  INT task_num;			/* SHZ 7/1/96 , for task number */
+  INT i, j, task;
+  INT xb_addr, yb_addr;		/* Bundle pixel address.     */
+  INT xb_end, yb_end;		/* End bundle pixels.        */
+  INT xb_size, yb_size;		/* Bundle size.              */
+  WPJOB *wpentry;		/* New work pool entry.      */
+
+  /* Starting block pixel address (upper left pixel). */
+
+  /*get_half_task_num();
+   */
+  xb_addr = xs;
+  yb_addr = ys;
+
+  /* Ending block pixel address (lower right pixel). */
+
+  xb_end = xb_addr + xe - 1;
+  yb_end = yb_addr + ye - 1;
+
+  for (i = 0; i < ye; i += ybe) {
+    for (j = 0; j < xe; j += xbe) {
+      /* Determine bundle size. */
+
+      if ((xb_addr + xbe - 1) <= xb_end)
+	xb_size = xbe;
+      else
+	xb_size = xb_end - xb_addr + 1;
+
+      if ((yb_addr + ybe - 1) <= yb_end)
+	yb_size = ybe;
+      else
+	yb_size = yb_end - yb_addr + 1;
+
+      /* Initialize work pool entry. */
+
+      task_num = gm->workpool1[pid][0].pad1;
+
+      if (task_num < HALF_TASK_NUM) {
+	(gm->workpool1[pid][0].pad1)++;
+	gm->workpool1[pid][task_num].xpix = xb_addr;
+	gm->workpool1[pid][task_num].ypix = yb_addr;
+	gm->workpool1[pid][task_num].xdim = xb_size;
+	gm->workpool1[pid][task_num].ydim = yb_size;
+      } else {
+	task_num = (gm->workpool2[pid][0].pad1)++;
+	gm->workpool2[pid][task_num].xpix = xb_addr;
+	gm->workpool2[pid][task_num].ypix = yb_addr;
+	gm->workpool2[pid][task_num].xdim = xb_size;
+	gm->workpool2[pid][task_num].ydim = yb_size;
+      }
+      xb_addr += xbe;
+    }
+
+    xb_addr = xs;
+    yb_addr += ybe;
+  }
+  /*printf("task number is %d..%d\n", gm->workpool1[pid][0].pad1,
+	 gm->workpool2[pid][0].pad1);*/
+}
+
+/*
+ * NAME
+ *      GetOneJob - get next job from pid's work pool
+ *
+ * SYNOPSIS
+ *      INT     GetOneJob(job, pid)
+ *      RAYJOB  *job;                   // Ray job description.
+ *      INT     pid;                    // Process id.
+ *
+ * DESCRIPTION
+ *      Return a primary ray job bundle from the top of the stack.  A ray job
+ *      bundle consists of the starting primary ray pixel address and the size
+ *      of the pixel bundle.
+ *
+ * RETURNS
+ *      Work pool status code.
+ */
+
+INT 
+GetOneJob(job, pid, who)
+     RAYJOB *job;
+     INT pid;
+     INT who;			/* 1: local processor, 0 :stealing */
+{
+  WPJOB *wpentry;		/* Work pool entry.          */
+  INT task_num;
+
+  if (who) {
+    task_num = gm->workpool1[pid][0].pad1;
+    if (task_num) {
+      (gm->workpool1[pid][0].pad1)--;
+      wpentry = &(gm->workpool1[pid][task_num - 1]);
+      job->x = wpentry->xpix;
+      job->y = wpentry->ypix;
+      job->xcurr = wpentry->xpix;
+      job->ycurr = wpentry->ypix;
+      job->xlen = wpentry->xdim;
+      job->ylen = wpentry->ydim;
+      return (WPS_VALID);
+    }
+  }
+  ALOCK(gm->wplock, pid)
+    task_num = gm->workpool2[pid][0].pad1;
+  if (!task_num) {
+    AULOCK(gm->wplock, pid)
+      return (WPS_EMPTY);
+  }
+  (gm->workpool2[pid][0].pad1)--;
+  AULOCK(gm->wplock, pid)
+    wpentry = &(gm->workpool2[pid][task_num - 1]);
+  job->x = wpentry->xpix;
+  job->y = wpentry->ypix;
+  job->xcurr = wpentry->xpix;
+  job->ycurr = wpentry->ypix;
+  job->xlen = wpentry->xdim;
+  job->ylen = wpentry->ydim;
+  return (WPS_VALID);
+}
+
+/*SHZ6/27/96 ,check local node */
+
+INT 
+CheckNode(job, pid, node_num, seqe)
+     RAYJOB *job;
+     INT node_num, seqe, pid;
+{
+  INT p_num, i;
+
+  i = (seqe + 1) % 4;
+  while (i != seqe) {
+    p_num = i + 4 * node_num;
+    if (GetOneJob(job, p_num, 0) == WPS_VALID) {
+      task_steal[pid][task_steal_num[pid]] = p_num;
+      task_steal_num[pid]++;
+      return (WPS_VALID);
+    }
+    i = (i + 1) % 4;
+  }
+  return (WPS_EMPTY);
+}
+
+	/*SHZ6/27/96 */
+
+/*
+ * NAME
+ *      GetJobs - get next job for pid (with job stealing)
+ *
+ * SYNOPSIS
+ *      INT     GetJobs(job, pid)
+ *      RAYJOB  *job;                   // Ray job pointer from work pool.
+ *      INT     pid;                    // Process id.
+ *
+ * DESCRIPTION
+ *
+ * RETURNS
+ *      Workpool status.
+ */
+
+INT 
+GetJobs(job, pid)
+     RAYJOB *job;
+     INT pid;
+{
+  INT i, j, now_node, now_pid, node, pos_in_node, max_node, max_thread;
+
+#ifdef SMP_STEAL
+  pTlsData ptdData = GetMyTlsData(); /*@@@ dongming: specific to svm/nt */
+#endif
+
+  i = pid;
+  if (GetOneJob(job, i, 1) == WPS_VALID) {
+    return (WPS_VALID);
+  }
+
+#if 1				/* enable task stealing */
+
+  if (gm->nprocs == 1) {
+    Global_Free(gm->workpool1[0]);
+    Global_Free(gm->workpool2[0]);
+    return (WPS_EMPTY);
+  }
+  /* SHZ6/27/96 , to check local node */
+
+#ifndef SMP_STEAL
+  i = (pid + 1) % gm->nprocs;
+  while (i != pid) {
+    if (GetOneJob(job, i, 0) == WPS_VALID) {
+      return (WPS_VALID);
+    }
+    i = (i + 1) % gm->nprocs;
+  }
+#else
+  /* @@@ dongming: stealing within a node first, and then across node */
+  /* these are specific to the svm/nt protocol */
+  node = node_id;
+  pos_in_node = GetThreadNum() - 1;
+  max_node = numb_nodes;
+  max_thread = procs_per_node;
+  printf("node=%d, thread=%d, num_node=%d, num_thread=%d\n", node, pos_in_node, max_node, max_thread);
+
+  j = node;
+  do {
+     /* stealing within a node */
+     i = (pos_in_node + 1) % max_thread;
+     while (i != pos_in_node) {
+       now_pid = j * max_thread + i;
+       if (GetOneJob(job, now_pid, 0) == WPS_VALID) {
+         return (WPS_VALID);
+       }
+       i = (i + 1) % max_thread;
+	   if (pos_in_node < 0)
+		 pos_in_node = 0;
+     }
+     
+	 /* stealing from next node */
+	 j = (j + 1) % max_node;
+	 pos_in_node = -1;
+  } while (j != node);
+#endif /* SMP_STEAL */
+
+#endif /* stealing */
+
+  return (WPS_EMPTY);
+}
+
+/*SHZ6/26/96 */
+
+/*
+ * NAME
+ *      PrintWorkPool - print out the work pool entries for a given process
+ *
+ * SYNOPSIS
+ *      VOID    PrintWorkPool(pid)
+ *      INT     pid;                    // Process id.
+ *
+ * RETURNS
+ *      Nothing.
+ */
+/*
+   VOID PrintWorkPool(pid)
+   INT  pid;
+   {
+   WPJOB        *j;
+
+   j = gm->workpool[pid][0];
+
+   while (j)
+   {
+   printf("Workpool entry:    pid=%3ld    xs=%3ld    ys=%3ld    xe=%3ld    ye=%3ld\n", pid, j->xpix, j->ypix, j->xdim, j->ydim);
+   j = j->next;
+   }
+   }
+ */
+
+/*
+ * NAME
+ *      InitWorkPool - fill pid's work pool with jobs
+ *
+ * SYNOPSIS
+ *      VOID    InitWorkPool(pid)
+ *      INT     pid;                    // Process id to initialize.
+ *
+ * RETURNS
+ *      Nothing.
+ */
+
+VOID 
+InitWorkPool(pid)
+     INT pid;
+{
+  INT i;
+  INT x, y;
+  INT xe, ye;
+  INT xsize, ysize;
+
+/*SHZ6/28/96    gm->wpstat[pid][0]   = WPS_VALID; */
+  gm->workpool1[pid][0].pad1 = 0;
+  gm->workpool2[pid][0].pad1 = 0;
+
+  i = 0;
+  xsize = Display.xres / blockx;
+  ysize = Display.yres / blocky;
+
+  for (y = 0; y < Display.yres; y += ysize) {
+    if (y + ysize > Display.yres)
+      ye = Display.yres - y;
+    else
+      ye = ysize;
+
+    for (x = 0; x < Display.xres; x += xsize) {
+      if (x + xsize > Display.xres)
+	xe = Display.xres - x;
+      else
+	xe = xsize;
+
+      if (i == pid)
+	PutJob(x, y, xe, ye, bundlex, bundley, pid);
+
+      i = (i + 1) % gm->nprocs;
+    }
+  }
+  gm->workpool1[pid][0].pad1 = HALF_TASK_NUM;
+  gm->workpool2[pid][0].pad1 = HALF_TASK_NUM;
+}

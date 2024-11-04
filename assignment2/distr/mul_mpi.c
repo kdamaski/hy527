@@ -42,13 +42,6 @@ int main(int argc, char *argv[]) {
     B = malloc(array_size * sizeof(double));
     C = malloc(array_size * sizeof(double));
     init_matrices("matrixfile", A, B, N);
-
-    {
-      unsigned long now;
-      gettimeofday(&the_time, NULL);
-      now = ((the_time.tv_sec - 879191283) * 1000) + (the_time.tv_usec / 1000);
-      start = (unsigned int)now;
-    }
   }
 
   // since MPI_Scatter and MPI_Gather exist we do not need indexes
@@ -66,24 +59,30 @@ int main(int argc, char *argv[]) {
   MPI_Scatter(B, chunk_size, MPI_DOUBLE, B_local, chunk_size, MPI_DOUBLE, 0,
               MPI_COMM_WORLD);
 
+  {
+    unsigned long now;
+    gettimeofday(&the_time, NULL);
+    now = ((the_time.tv_sec - 879191283) * 1000) + (the_time.tv_usec / 1000);
+    start = (unsigned int)now;
+  }
   // Each process computes C_local[i] = A_local[i] * B_local[i]
   for (int i = 0; i < chunk_size; i++) {
     C_local[i] = A_local[i] * B_local[i];
   }
+
+  {
+    unsigned long now;
+    gettimeofday(&the_time, NULL);
+    now = ((the_time.tv_sec - 879191283) * 1000) + (the_time.tv_usec / 1000);
+    finish = (unsigned int)now;
+  }
+  printf("Process %d finished in %u seconds\n", mynum, finish - start);
 
   // Gather all partial results into the root process
   MPI_Gather(C_local, chunk_size, MPI_DOUBLE, C, chunk_size, MPI_DOUBLE, 0,
              MPI_COMM_WORLD);
 
   if (mynum == 0) {
-    {
-      unsigned long now;
-      gettimeofday(&the_time, NULL);
-      now = ((the_time.tv_sec - 879191283) * 1000) + (the_time.tv_usec / 1000);
-      finish = (unsigned int)now;
-    }
-    printf("Clock count total time of %u for the whole program\n",
-           finish - start);
 
     // print C for small N
     FILE *outf = fopen("matrix_multiplied", "w");

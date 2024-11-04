@@ -2,3 +2,5 @@ assignment1/a.out
 assignment2/shared_mem/matrix_multiplied
 assignment2/shared_mem/matrixfile
 assignment2/mmul.c
+assignment2/distr/matrix_multiplied
+assignment2/distr/matrixfile

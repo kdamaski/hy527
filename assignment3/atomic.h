@@ -3,12 +3,32 @@
  * and in gcc inline assembly.
  */
 
+// spin lock start
 typedef struct {
-  volatile unsigned long lock; // Lock variable (0 for unlocked, 1 for locked)
+  volatile unsigned lock; // Lock variable (0 for unlocked, 1 for locked)
 } spinlock_t;
+// spin lock end
+
+// ticket lock start
+typedef struct {
+  volatile unsigned next_ticket; // The next available ticket number
+  volatile unsigned curr_ticket; // The current ticket being served
+} ticket_lock_t;
+// ticket lock end
+
+// mcs lock start
+typedef struct mcs_node {
+  struct mcs_node *next;
+  volatile unsigned locked; // Is lock occupied? (1 locked, 0 unlocked)
+} mcs_node_t;
+
+typedef struct {
+  struct mcs_node *tail;
+} mcs_lock_t;
+// mcs lock end
 
 #define FETCH_AND_ADD(address, increment)                                      \
-  asm volatile("lock xaddl %0,%1"                                              \
+  asm volatile("lock xadd %0,%1"                                               \
                : "=r"(increment), "=m"(address)                                \
                : "0"(increment)                                                \
                : "memory");

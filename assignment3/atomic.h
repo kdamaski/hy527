@@ -31,7 +31,7 @@ typedef struct {
 #define DECREMENT(value)                                                       \
   asm volatile("lock decl %0" : "=m"(value) : "m"(value));
 
-// returns the old value.
+// returns the old value of ptr (lock).
 static inline unsigned long CMPXCHG(volatile void *ptr, unsigned long ovalue,
                                     unsigned long nvalue) {
   unsigned long prev;

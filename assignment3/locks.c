@@ -3,17 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// #define MAX_SPIN 12332
-// #define MIN_SPIN 932
-
-/*     spinlock start        */
-// void backoff() {
-//   unsigned spins = rand() % (MAX_SPIN - MIN_SPIN) + MIN_SPIN;
-//   for (int i = 0; i < spins; i++) {
-//     ;
-//   }
-// }
-
 spinlock_t s_lock;
 
 void spinlock_init() { s_lock.lock = 0; }
@@ -59,48 +48,43 @@ void ticket_unlock(ticket_lock_t *lock) {
 
 /* mcs_lock  start */
 mcs_lock_t mcslock;
-void mcs_lock_init(mcs_lock_t *lock) {
-  lock->tail = NULL; // Initialize the tail to null (no threads in the queue)
-}
 
-void mcs_lock(mcs_lock_t *lock, mcs_node_t *my_node) {
-  my_node->next = NULL; // Initialize next pointer
-  my_node->locked = 1;  // Mark the node as locked
+void mcs_lock_init() { mcslock.tail = NULL; }
 
-  // Atomically swap the tail with the current node (enqueue this node)
-  mcs_node_t *prev = (mcs_node_t *)CMPXCHG(&lock->tail, (unsigned long)NULL,
-                                           (unsigned long)my_node);
+void mcs_lock(mcs_node_t *my_node) {
 
-  printf(
-      "Managed to survive CMPXCHG prev was %p tail is %p and has locked = %u\n",
-      prev, mcslock.tail, mcslock.tail->locked);
+  my_node->next = NULL;
+  my_node->locked = 1;
+
+  mcs_node_t *prev =
+      (mcs_node_t *)EXCHANGE(&mcslock.tail, (unsigned long)my_node);
+
   if (prev != NULL) {
     // Queue was not empty, link this node to the previous one
-    prev->next = my_node;
+    STORE_EXPLICIT(&prev->next, (unsigned long)my_node);
 
     // Spin until this thread is granted the lock (locked becomes 0)
-    while (my_node->locked == 1) {
-      __asm__ volatile("pause");
+    while (my_node->locked) {
+      ;
     }
   }
 }
 
-void mcs_unlock(mcs_lock_t *lock, mcs_node_t *my_node) {
+void mcs_unlock(mcs_node_t *my_node) {
   // Check if there is a successor node
-  if (my_node->next == NULL) {
-    // Try to set the tail to NULL if this node is the last one
-    if (CMPXCHG(&lock->tail, NULL, NULL) == (unsigned long)my_node) {
-      return; // Lock released with no successor
+  mcs_node_t *successor = (mcs_node_t *)LOAD_EXPLICIT(&my_node->next);
+  if (successor == NULL) {
+    if (CMPXCHG(&mcslock.tail, (unsigned long)my_node, (unsigned long)NULL) ==
+        (unsigned long)my_node) {
+      return; // Lock released successfully
     }
-
     // Wait until the next pointer is updated by a new enqueued node
-    while (my_node->next == NULL) {
-      __asm__ volatile("pause");
-    }
+    while ((successor = (mcs_node_t *)LOAD_EXPLICIT(&my_node->next)) == NULL)
+      ;
   }
 
   // Notify the next node in the queue by setting its locked flag to 0
-  my_node->next->locked = 0;
+  STORE_EXPLICIT(&successor->locked, 0);
 }
 
 int shared_counter = 0;
@@ -108,14 +92,14 @@ void *thread_func(void *arg) {
   mcs_node_t my_node; // Each thread has its own node
 
   for (int i = 0; i < 10000; i++) {
+    mcs_lock(&my_node);
     // ticket_lock(&t_lock);
     // spinlock_lock(&s_lock);
-    mcs_lock(&mcslock, &my_node);
 
     shared_counter++;
     // spinlock_unlock(&s_lock);
     // ticket_unlock(&t_lock);
-    mcs_unlock(&mcslock, &my_node);
+    mcs_unlock(&my_node);
   }
   printf("counter out %d\n", shared_counter);
 
@@ -125,9 +109,9 @@ void *thread_func(void *arg) {
 /* mcs_lock  end */
 
 int main(int argc, char *argv[]) {
-  mcs_lock_init(&mcslock);
-  ticket_lock_init(&t_lock);
-  spinlock_init();
+  mcs_lock_init();
+  // ticket_lock_init(&t_lock);
+  // spinlock_init();
 
   // Create threads
   const int num_threads = 4;

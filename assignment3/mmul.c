@@ -1,4 +1,5 @@
 #include "atomic.h"
+#include <assert.h>
 #include <getopt.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -19,10 +20,7 @@ pthread_mutex_t barrier_mutex;
 int thread_count = 0;
 pthread_t threads[MAX_THREADS];
 int id = 0;
-pthread_mutex_t id_lock;
-;
 /* standard libraries structs, functions, macros (e.g MAX_THREADS 8) */
-#include <assert.h>
 #define DEFAULT_N 2000
 #define DEFAULT_P 1
 
@@ -37,7 +35,7 @@ int N = DEFAULT_N;
 
 unsigned start, finish;
 
-void init_matrices(char *fname, double A[N * N], double B[N * N], int dim);
+void init_matrices(char *fname, double A[N * N], double B[N * N]);
 
 void *matrix_multiplication(void *);
 
@@ -50,14 +48,6 @@ double A[DEFAULT_N * DEFAULT_N], B[DEFAULT_N * DEFAULT_N],
     C[DEFAULT_N * DEFAULT_N];
 
 int main(int argc, char *argv[]) {
-
-  pthread_mutex_init((pthread_mutex_t *)&(id_lock), NULL);
-  ;
-  pthread_mutex_init(&barrier_mutex, NULL);
-  pthread_cond_init(&barrier_cond, NULL);
-  pthread_mutex_lock(&barrier_mutex);
-  pthread_mutex_unlock(&barrier_mutex);
-  // inits locks and barriers
 
   int c;
   while ((c = getopt(argc, argv, "p:n:")) != -1) {
@@ -87,7 +77,7 @@ int main(int argc, char *argv[]) {
   // assert((elems_per_thread % P) == 0); // assume there is no remainder
 
   barrier_init(&mul_barrier, P);
-  init_matrices("matrixfile", A, B, N);
+  init_matrices("matrixfile", A, B);
 
   struct thread_data thread_args[P - 1];
 
@@ -99,11 +89,11 @@ int main(int argc, char *argv[]) {
     now = ((the_time.tv_sec - 879191283) * 1000) + (the_time.tv_usec / 1000);
     start = (unsigned int)now;
   }
-  for (int i = 0; i < P - 1; i++) {
+  for (int i = 1; i < P; i++) {
     thread_args[i].tid = i;
     thread_args[i].t_first_i = i * elems_per_thread;
-    thread_args[i].t_last_i = ((i + 1) * elems_per_thread) - 1;
-    if (i == P - 2) {
+    thread_args[i].t_last_i = ((i + 1) * elems_per_thread);
+    if (i == P - 1) {
       thread_args[i].t_last_i += remainder;
     }
     pthread_create(&threads[i], NULL, matrix_multiplication, &thread_args[i]);
@@ -117,7 +107,7 @@ int main(int argc, char *argv[]) {
     now = ((the_time.tv_sec - 879191283) * 1000) + (the_time.tv_usec / 1000);
     starttime = (unsigned int)now;
   }
-  for (int i = 0; i < elems_per_thread - 1; ++i) {
+  for (int i = 0; i < elems_per_thread; ++i) {
     C[i] = A[i] * B[i];
   }
   {
@@ -150,7 +140,7 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
-void init_matrices(char *fname, double A[N * N], double B[N * N], int dim) {
+void init_matrices(char *fname, double A[N * N], double B[N * N]) {
   assert(fname);
   FILE *f = fopen(fname, "r");
   assert(f);

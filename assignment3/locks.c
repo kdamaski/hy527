@@ -83,7 +83,6 @@ void mcs_unlock(mcs_node_t *my_node) {
     while ((successor = (mcs_node_t *)LOAD_EXPLICIT(&my_node->next)) == NULL)
       ;
   }
-
   // Notify the next node in the queue by setting its locked flag to 0
   STORE_EXPLICIT(&successor->locked, 0);
 }

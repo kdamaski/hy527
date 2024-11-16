@@ -62,11 +62,11 @@ int main(int argc, char *argv[]) {
   unsigned remainder = array_size % P;
 
   CLOCK(start)
-  for (int i = 0; i < P - 1; i++) {
+  for (int i = 1; i < P; i++) {
     thread_args[i].tid = i;
     thread_args[i].t_first_i = i * elems_per_thread;
-    thread_args[i].t_last_i = ((i + 1) * elems_per_thread) - 1;
-    if (i == P - 2) {
+    thread_args[i].t_last_i = ((i + 1) * elems_per_thread);
+    if (i == P - 1) {
       thread_args[i].t_last_i += remainder;
     }
     pthread_create(&threads[i], NULL, matrix_multiplication, &thread_args[i]);
@@ -75,7 +75,7 @@ int main(int argc, char *argv[]) {
   // assign work to the main process
   unsigned starttime, finishtime;
   CLOCK(starttime)
-  for(int i = 0; i < elems_per_thread - 1; ++i) {
+  for(int i = 0; i < elems_per_thread; ++i) {
     C[i] = A[i] * B[i];
   }
   CLOCK(finishtime)

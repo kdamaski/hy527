@@ -127,11 +127,11 @@ int main(int argc, char *argv[]) {
     now = ((the_time.tv_sec - 879191283) * 1000) + (the_time.tv_usec / 1000);
     start = (unsigned int)now;
   }
-  for (int i = 0; i < P - 1; i++) {
+  for (int i = 1; i < P; i++) {
     thread_args[i].tid = i;
     thread_args[i].t_first_i = i * elems_per_thread;
-    thread_args[i].t_last_i = ((i + 1) * elems_per_thread) - 1;
-    if (i == P - 2) {
+    thread_args[i].t_last_i = ((i + 1) * elems_per_thread);
+    if (i == P - 1) {
       thread_args[i].t_last_i += remainder;
     }
     pthread_create(&threads[i], NULL, matrix_multiplication, &thread_args[i]);
@@ -145,7 +145,7 @@ int main(int argc, char *argv[]) {
     now = ((the_time.tv_sec - 879191283) * 1000) + (the_time.tv_usec / 1000);
     starttime = (unsigned int)now;
   }
-  for (int i = 0; i < elems_per_thread - 1; ++i) {
+  for (int i = 0; i < elems_per_thread; ++i) {
     C[i] = A[i] * B[i];
   }
   {

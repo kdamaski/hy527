@@ -65,6 +65,7 @@ void mcs_lock(mcs_node_t *my_node) {
 
     // Spin until this thread is granted the lock (locked becomes 0)
     while (my_node->locked) {
+      // __asm__ volatile("pause"); // good for more cpu bound ops
       ;
     }
   }

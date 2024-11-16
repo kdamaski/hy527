@@ -3,6 +3,14 @@
  * and in gcc inline assembly.
  */
 
+// barrier start
+typedef struct {
+  int num_threads;
+  volatile unsigned thr_counter;
+  volatile unsigned bar_phase;
+} barrier_t;
+// barrier end
+
 // spin lock start
 typedef struct {
   volatile unsigned lock; // Lock variable (0 for unlocked, 1 for locked)
@@ -22,7 +30,7 @@ typedef struct mcs_node {
   unsigned locked; // Is lock occupied? (1 locked, 0 unlocked)
 } mcs_node_t;
 
-typedef struct mcs_lock {
+typedef struct {
   volatile mcs_node_t *tail;
 } mcs_lock_t;
 // mcs lock end

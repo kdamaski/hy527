@@ -6,7 +6,7 @@
 // barrier start
 typedef struct {
   int num_threads;
-  volatile unsigned thr_counter;
+  volatile unsigned thr_count;
   volatile unsigned bar_phase;
 } barrier_t;
 // barrier end

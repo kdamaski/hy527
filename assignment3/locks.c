@@ -88,49 +88,34 @@ void mcs_unlock(mcs_node_t *my_node) {
   STORE_EXPLICIT(&successor->locked, 0);
 }
 
-int shared_counter = 0;
-void *thread_func(void *arg) {
-  mcs_node_t my_node; // Each thread has its own node
-
-  for (int i = 0; i < 10000; i++) {
-    mcs_lock(&my_node);
-    // ticket_lock(&t_lock);
-    // spinlock_lock(&s_lock);
-
-    shared_counter++;
-    // spinlock_unlock(&s_lock);
-    // ticket_unlock(&t_lock);
-    mcs_unlock(&my_node);
-  }
-  printf("counter out %d\n", shared_counter);
-
-  return NULL;
+// barrier start
+static inline void MEMORY_BARRIER() { asm volatile("mfence" ::: "memory"); }
+// Function to initialize the barrier
+void barrier_init(barrier_t *barrier, int num_threads) {
+  barrier->thr_count = 0;
+  barrier->bar_phase = 0;
+  barrier->num_threads = num_threads;
 }
 
-/* mcs_lock  end */
+// Function for threads to wait at the barrier
+void barrier_wait(barrier_t *barrier) {
+  int old_value;
+  int local_phase = barrier->bar_phase;
 
-int main(int argc, char *argv[]) {
-  mcs_lock_init();
-  // ticket_lock_init(&t_lock);
-  // spinlock_init();
+  // Atomically increment the thr_count of threads at the barrier
+  FETCH_AND_INCREMENT(barrier->thr_count, old_value);
 
-  // Create threads
-  const int num_threads = 4;
-  pthread_t threads[num_threads];
-
-  for (int i = 0; i < num_threads; i++) {
-    if (pthread_create(&threads[i], NULL, thread_func, NULL) != 0) {
-      perror("Failed to create thread");
-      return 1;
+  if (barrier->thr_count == barrier->num_threads) {
+    // Last thread to arrive resets the thr_count and advances the bar_phase
+    barrier->thr_count = 0;
+    MEMORY_BARRIER();     // Ensure memory operations are completed
+    barrier->bar_phase++; // Increment the bar_phase to release waiting threads
+  } else {
+    // Busy-wait until the bar_phase changes, using 'pause' for efficiency
+    while (barrier->bar_phase == local_phase) {
+      __asm__ volatile("pause");
     }
   }
-
-  // Join threads
-  for (int i = 0; i < num_threads; i++) {
-    pthread_join(threads[i], NULL);
-  }
-
-  // Print the result
-  printf("Final counter value: %d\n", shared_counter);
-  return EXIT_SUCCESS;
 }
+
+// barrier end

@@ -7,3 +7,6 @@ assignment2/distr/matrixfile
 assignment2/shared_mem/mmul
 assignment2/distr/mmul_distributed
 assignment3/a.out
+assignment3/matrix_multiplied
+assignment3/matrixfile
+assignment3/mmul

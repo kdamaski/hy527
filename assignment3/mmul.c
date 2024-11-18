@@ -1,5 +1,4 @@
 #include "atomic.h"
-#include <assert.h>
 #include <getopt.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -11,16 +10,102 @@
 
 #define MAX_THREADS 8
 
-extern void barrier_init(barrier_t *barrier, int num_threads);
-extern void barrier_wait(barrier_t *barrier);
-
 struct timeval the_time;
-pthread_cond_t barrier_cond;
-pthread_mutex_t barrier_mutex;
 int thread_count = 0;
-pthread_t threads[MAX_THREADS];
 int id = 0;
-/* standard libraries structs, functions, macros (e.g MAX_THREADS 8) */
+barrier_t barrier;
+pthread_t threads[MAX_THREADS];
+
+spinlock_t s_lock;
+
+void spinlock_init() { s_lock.lock = 0; }
+
+void spinlock_lock(spinlock_t *lock) {
+  while (1) {
+    if (CMPXCHG(&lock->lock, 0, 1) == 0) {
+      return;
+    }
+    __asm__ volatile("pause");
+  }
+}
+void spinlock_unlock(spinlock_t *lock) { DECREMENT(lock->lock); }
+
+ticket_lock_t t_lock;
+
+void ticket_lock_init(ticket_lock_t *lock) {
+  lock->next_ticket = 0;
+  lock->curr_ticket = 0;
+}
+
+void ticket_lock(ticket_lock_t *lock) {
+  unsigned my_ticket;
+  FETCH_AND_INCREMENT(lock->next_ticket, my_ticket);
+
+  while (lock->curr_ticket != my_ticket) {
+    __asm__ volatile("pause");
+  }
+}
+
+void ticket_unlock(ticket_lock_t *lock) { INCREMENT(lock->curr_ticket); }
+
+mcs_lock_t mcslock;
+
+void mcs_lock_init() { mcslock.tail = NULL; }
+
+void mcs_lock(mcs_node_t *my_node) {
+
+  my_node->next = NULL;
+  my_node->locked = 1;
+
+  mcs_node_t *prev =
+      (mcs_node_t *)EXCHANGE(&mcslock.tail, (unsigned long)my_node);
+
+  if (prev != NULL) {
+    STORE_EXPLICIT(&prev->next, (unsigned long)my_node);
+
+    while (my_node->locked) {
+      ;
+    }
+  }
+}
+
+void mcs_unlock(mcs_node_t *my_node) {
+  mcs_node_t *successor = (mcs_node_t *)LOAD_EXPLICIT(&my_node->next);
+  if (successor == NULL) {
+    if (CMPXCHG(&mcslock.tail, (unsigned long)my_node, (unsigned long)NULL) ==
+        (unsigned long)my_node) {
+      return;
+    }
+    while ((successor = (mcs_node_t *)LOAD_EXPLICIT(&my_node->next)) == NULL)
+      ;
+  }
+  STORE_EXPLICIT(&successor->locked, 0);
+}
+
+void barrier_init(barrier_t *barrier, int num_threads) {
+  barrier->thr_count = 0;
+  barrier->bar_phase = 0;
+  barrier->num_threads = num_threads;
+}
+
+void barrier_wait(barrier_t *barrier) {
+  int old_value;
+  int local_phase = barrier->bar_phase;
+
+  FETCH_AND_INCREMENT(barrier->thr_count, old_value);
+
+  if (barrier->thr_count == barrier->num_threads) {
+    barrier->thr_count = 0;
+    MEMORY_BARRIER();
+    barrier->bar_phase++;
+  } else {
+    while (barrier->bar_phase == local_phase) {
+      __asm__ volatile("pause");
+    }
+  }
+}
+
+#include <assert.h>
 #define DEFAULT_N 2000
 #define DEFAULT_P 1
 
@@ -35,7 +120,7 @@ int N = DEFAULT_N;
 
 unsigned start, finish;
 
-void init_matrices(char *fname, double A[N * N], double B[N * N]);
+void init_matrices(char *fname, double A[N * N], double B[N * N], int dim);
 
 void *matrix_multiplication(void *);
 
@@ -48,6 +133,10 @@ double A[DEFAULT_N * DEFAULT_N], B[DEFAULT_N * DEFAULT_N],
     C[DEFAULT_N * DEFAULT_N];
 
 int main(int argc, char *argv[]) {
+
+  mcs_lock_init();
+  ;
+  ;
 
   int c;
   while ((c = getopt(argc, argv, "p:n:")) != -1) {
@@ -77,7 +166,7 @@ int main(int argc, char *argv[]) {
   // assert((elems_per_thread % P) == 0); // assume there is no remainder
 
   barrier_init(&mul_barrier, P);
-  init_matrices("matrixfile", A, B);
+  init_matrices("matrixfile", A, B, N);
 
   struct thread_data thread_args[P - 1];
 
@@ -140,7 +229,7 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
-void init_matrices(char *fname, double A[N * N], double B[N * N]) {
+void init_matrices(char *fname, double A[N * N], double B[N * N], int dim) {
   assert(fname);
   FILE *f = fopen(fname, "r");
   assert(f);

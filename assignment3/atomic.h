@@ -105,3 +105,18 @@ static inline unsigned long LOAD_EXPLICIT(volatile void *ptr) {
   );
   return value;
 }
+static inline void MEMORY_BARRIER() { asm volatile("mfence" ::: "memory"); }
+
+// all the following locks assume that a global lock of each kind will be
+// instantiated
+void spinlock_init();
+void spinlock_lock(spinlock_t *lock);
+void spinlock_unlock(spinlock_t *lock);
+
+void ticket_lock_init(ticket_lock_t *lock);
+void ticket_lock(ticket_lock_t *lock);
+void ticket_unlock(ticket_lock_t *lock);
+
+void mcs_lock_init();
+void mcs_lock(mcs_node_t *my_node);
+void mcs_unlock(mcs_node_t *my_node);

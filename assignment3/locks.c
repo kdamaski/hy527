@@ -88,7 +88,6 @@ void mcs_unlock(mcs_node_t *my_node) {
 }
 
 // barrier start
-static inline void MEMORY_BARRIER() { asm volatile("mfence" ::: "memory"); }
 // Function to initialize the barrier
 void barrier_init(barrier_t *barrier, int num_threads) {
   barrier->thr_count = 0;

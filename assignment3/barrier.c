@@ -1,5 +1,6 @@
 #include "atomic.h"
 #include <pthread.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -121,48 +122,50 @@ void barrier_wait(barrier_t *barrier, int num_threads) {
     }
   }
 }
+
 // barrier end
 
-int shared_counter = 0;
+// int shared_counter = 0;
 
-__thread mcs_node_t node;
+// lock_t id_lock;
 
-void *thread_func(void *arg) {
+// void *thread_func(void *arg) {
 
-  for (int i = 0; i < 50000; i++) {
-    mcs_lock(&node);
-    // Critical section
-    shared_counter++;
-    mcs_unlock(&node);
-  }
-  printf("Thread %d exiting with counter value: %d\n", *(int *)arg,
-         shared_counter);
+//   for (int i = 0; i < 50000; i++) {
+//     lock(&id_lock);
+//     // Critical section
+//     shared_counter++;
+//     unlock(&id_lock);
+//   }
+//   printf("Thread %d exiting with counter value: %d\n", *(int *)arg,
+//          shared_counter);
 
-  return NULL;
-}
+//   return NULL;
+// }
 
-int main() {
-  pthread_t threads[4];
+// int main() {
+//   pthread_t threads[4];
 
-  // Initialize the lock
-  mcs_lock_init();
+//   // Initialize the lock
+//   lock_init(&id_lock);
 
-  // Create threads
-  int arg[4] = {0, 1, 2, 3};
-  for (int i = 0; i < 4; i++) {
-    if (pthread_create(&threads[i], NULL, thread_func, (void *)&arg[i]) != 0) {
-      perror("Failed to create thread");
-      return 1;
-    }
-  }
+//   // Create threads
+//   int arg[4] = {0, 1, 2, 3};
+//   for (int i = 0; i < 4; i++) {
+//     if (pthread_create(&threads[i], NULL, thread_func, (void *)&arg[i]) != 0)
+//     {
+//       perror("Failed to create thread");
+//       return 1;
+//     }
+//   }
 
-  // Join threads
-  for (int i = 0; i < 4; i++) {
-    pthread_join(threads[i], NULL);
-  }
+//   // Join threads
+//   for (int i = 0; i < 4; i++) {
+//     pthread_join(threads[i], NULL);
+//   }
 
-  // Print the result
-  printf("Final counter value: %d\n", shared_counter);
+//   // Print the result
+//   printf("Final counter value: %d\n", shared_counter);
 
-  return 0;
-}
+//   return 0;
+// }

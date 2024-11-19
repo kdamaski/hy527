@@ -48,46 +48,53 @@
 // /*     ticketlock end        */
 
 // /* mcs_lock  start */
-// mcs_lock_t mcslock;
+typedef struct mcs_node {
+  volatile struct mcs_node *next;
+  unsigned locked; // Is lock occupied? (1 locked, 0 unlocked)
+} mcs_node_t;
 
-// void mcs_lock_init() { mcslock.tail = NULL; }
+typedef struct lock_t {
+  volatile mcs_node_t *tail;
+} mcs_lock_t;
+mcs_lock_t mcslock;
 
-// void mcs_lock(mcs_node_t *my_node) {
+void mcs_lock_init() { mcslock.tail = NULL; }
 
-//   my_node->next = NULL;
-//   my_node->locked = 1;
+void mcs_lock(mcs_node_t *my_node) {
 
-//   mcs_node_t *prev =
-//       (mcs_node_t *)EXCHANGE(&mcslock.tail, (unsigned long)my_node);
+  my_node->next = NULL;
+  my_node->locked = 1;
 
-//   if (prev != NULL) {
-//     // Queue was not empty, link this node to the previous one
-//     STORE_EXPLICIT(&prev->next, (unsigned long)my_node);
+  mcs_node_t *prev =
+      (mcs_node_t *)EXCHANGE(&mcslock.tail, (unsigned long)my_node);
 
-//     // Spin until this thread is granted the lock (locked becomes 0)
-//     while (my_node->locked) {
-//       // __asm__ volatile("pause"); // good for more cpu bound ops
-//       ;
-//     }
-//   }
-// }
+  if (prev != NULL) {
+    // Queue was not empty, link this node to the previous one
+    STORE_EXPLICIT(&prev->next, (unsigned long)my_node);
 
-// void mcs_unlock(mcs_node_t *my_node) {
-//   // Check if there is a successor node
-//   mcs_node_t *successor = (mcs_node_t *)LOAD_EXPLICIT(&my_node->next);
-//   if (successor == NULL) {
-//     if (CMPXCHG(&mcslock.tail, (unsigned long)my_node, (unsigned long)NULL)
-//     ==
-//         (unsigned long)my_node) {
-//       return; // Lock released successfully
-//     }
-//     // Wait until the next pointer is updated by a new enqueued node
-//     while ((successor = (mcs_node_t *)LOAD_EXPLICIT(&my_node->next)) == NULL)
-//       ;
-//   }
-//   // Notify the next node in the queue by setting its locked flag to 0
-//   STORE_EXPLICIT(&successor->locked, 0);
-// }
+    // Spin until this thread is granted the lock (locked becomes 0)
+    while (my_node->locked) {
+      // __asm__ volatile("pause"); // good for more cpu bound ops
+      ;
+    }
+  }
+}
+
+void mcs_unlock(mcs_node_t *my_node) {
+  // Check if there is a successor node
+  mcs_node_t *successor = (mcs_node_t *)LOAD_EXPLICIT(&my_node->next);
+  if (successor == NULL) {
+    if (CMPXCHG(&mcslock.tail, (unsigned long)my_node, (unsigned long)NULL) ==
+        (unsigned long)my_node) {
+      return; // Lock released successfully
+    }
+    // Wait until the next pointer is updated by a new enqueued node
+    while ((successor = (mcs_node_t *)LOAD_EXPLICIT(&my_node->next)) == NULL)
+      ;
+  }
+  // Notify the next node in the queue by setting its locked flag to 0
+  STORE_EXPLICIT(&successor->locked, 0);
+}
 /* mcs lock end */
 
 // barrier start
@@ -168,4 +175,18 @@ void barrier_wait(barrier_t *barrier, int num_threads) {
 //   printf("Final counter value: %d\n", shared_counter);
 
 //   return 0;
+// }
+
+// int main(int argc, char *argv[]) {
+//   mcs_node_t *src, *newval, *output;
+//   src = malloc(sizeof(mcs_node_t));
+//   printf("src ptr has address : %p\n", src);
+//   newval = malloc(sizeof(mcs_node_t));
+//   printf("newval ptr has address : %p\n", newval);
+
+//   output = (mcs_node_t *)EXCHANGE(&src, (unsigned long)newval);
+
+//   printf("src ptr has address : %p\n", src);
+//   printf("output ptr has address : %p\n", output);
+//   return EXIT_SUCCESS;
 // }

@@ -108,8 +108,8 @@ define(BARDEC, `barrier_t $1;')
 define(BARINIT, `barrier_init(&$1);')
 define(BARRIER, `barrier_wait(&$1, $2);')
 
-dnl define(ACQUIRE,  `pthread_acquire((pthread_mutex_t*)&($1));')
-dnl define(RELEASE,  `pthread_release((pthread_mutex_t*)&($1));')
+define(ACQUIRE,  `lock(&($1));')
+define(RELEASE,  `unlock(&($1));')
 
 define(ALOCKDEC,  `lock_t ($1[$2]);')
 define(ALOCKINIT, `{
@@ -121,8 +121,8 @@ define(ALOCKINIT, `{
 define(ALOCK,      `lock(&($1[$2]));')
 define(AULOCK,     `unlock(&($1[$2]));')
 
-dnl define(AACQUIRE,   `pthread_acquire((pthread_mutex_t*)&($1[$2]));')
-dnl define(ARELEASE,   `pthread_release((pthread_mutex_t*)&($1[$2]));')
+define(AACQUIRE,   `lock(&($1[$2]));')
+define(ARELEASE,   `unlock(&($1[$2]));')
 
 define(WAIT_FOR_END, `')
 define(CLOCK, `{

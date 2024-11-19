@@ -1,4 +1,4 @@
-MAIN_ENV /* standard libraries structs, functions, macros (e.g MAX_THREADS 8) */
+MAIN_ENV
 #include <assert.h>
 #define DEFAULT_N 2000
 #define DEFAULT_P 1
@@ -27,7 +27,7 @@ double A[DEFAULT_N*DEFAULT_N], B[DEFAULT_N*DEFAULT_N], C[DEFAULT_N*DEFAULT_N];
 
 int main(int argc, char *argv[]) {
 
-  MAIN_INITENV() // inits locks and barriers
+  MAIN_INITENV()
 
   int c;
   while ((c = getopt(argc, argv, "p:n:")) != -1) {

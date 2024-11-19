@@ -1,6 +1,6 @@
-KOSTAS_ENV
-
 #include <assert.h>
+MAIN_ENV
+
 #define DEFAULT_N 2000
 #define DEFAULT_P 1
 
@@ -28,7 +28,7 @@ double A[DEFAULT_N*DEFAULT_N], B[DEFAULT_N*DEFAULT_N], C[DEFAULT_N*DEFAULT_N];
 
 int main(int argc, char *argv[]) {
 
-  KOSTAS_INITENV();
+  MAIN_INITENV()
 
   int c;
   while ((c = getopt(argc, argv, "p:n:")) != -1) {
@@ -55,7 +55,7 @@ int main(int argc, char *argv[]) {
 
   // assert((elems_per_thread % P) == 0); // assume there is no remainder
 
-  BARINIT(mul_barrier, P)
+  BARINIT(mul_barrier)
   init_matrices("matrixfile", A, B, N);
 
   struct thread_data thread_args[P - 1];

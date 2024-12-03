@@ -1,30 +1,68 @@
+#include <event2/buffer.h>
 #include <event2/bufferevent.h>
 #include <event2/event.h>
 #include <event2/listener.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define PORT 9999
 #define BACKLOG 128
+#define BUFFER_SIZE 4096
 
-// Callback for read events
 void echo_read_cb(struct bufferevent *bev, void *ctx) {
-  char buffer[1024];
-  int n = bufferevent_read(bev, buffer, sizeof(buffer) - 1);
-  if (n > 0) {
-    // buffer[n] = '\0'; // Null-terminate the received data
-    // printf("Received request:\n%s\n", buffer); // Log the incoming request
+  struct evbuffer *input = bufferevent_get_input(bev);
+  struct evbuffer *output = bufferevent_get_output(bev);
 
-    const char *response = "HTTP/1.1 200 OK\r\n"
-                           "Content-Length: 13\r\n"
-                           "\r\n"
-                           "Hello, World!";
-    bufferevent_write(bev, response, strlen(response));
-    // printf("Sent response\n");
+  // Read the request
+  char *request = evbuffer_readln(input, NULL, EVBUFFER_EOL_CRLF);
+  if (!request) {
+    return;
   }
+
+  // Check if the request is for /large_file
+  if (strstr(request, "GET /large_file")) {
+    const char *headers = "HTTP/1.1 200 OK\r\n"
+                          "Content-Type: application/octet-stream\r\n"
+                          "Content-Length: %ld\r\n"
+                          "Connection: close\r\n\r\n";
+
+    char file_path[] = "largefile0";
+    FILE *file = fopen(file_path, "rb");
+    if (!file) {
+      evbuffer_add_printf(output, "HTTP/1.1 500 Internal Server Error\r\n\r\n");
+      free(request);
+      return;
+    }
+
+    // Get file size
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    rewind(file);
+
+    // Write headers to output buffer
+    evbuffer_add_printf(output, headers, file_size);
+
+    // Write file content to output buffer
+    char buffer[BUFFER_SIZE];
+    size_t bytes_read;
+    while ((bytes_read = fread(buffer, 1, BUFFER_SIZE, file)) > 0) {
+      evbuffer_add(output, buffer, bytes_read);
+    }
+
+    fclose(file);
+  } else {
+    evbuffer_add_printf(output, "HTTP/1.1 404 Not Found\r\n\r\n");
+  }
+
+  free(request);
+  bufferevent_disable(bev, EV_READ | EV_WRITE);
+  bufferevent_free(bev);
 }
 
 // Callback for event errors or connection close

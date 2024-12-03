@@ -185,14 +185,14 @@ int myjointestfunc(void *args) {
   return Thread_self();
 }
 
-// int main() {
-//   int arg1 = 4, arg2 = 5, arg3 = 6, arg4 = 7;
-//   Thread_init();
-//   int thid1 = Thread_new(mytestfunc, (void *)&arg1, sizeof(int), NULL);
-//   int thid2 = Thread_new(mytestfunc, (void *)&arg2, sizeof(int), NULL);
-//   int thid3 = Thread_new(myjointestfunc, (void *)&arg3, sizeof(int), NULL);
-//   int thid4 = Thread_new(mytestfunc, (void *)&arg4, sizeof(int), NULL);
-//   Thread_join(0);
-//   // Thread_pause();
-//   printf("Returned to main successfully\n");
-// }
+int main() {
+  int arg1 = 4, arg2 = 5, arg3 = 6, arg4 = 7;
+  Thread_init();
+  int thid1 = Thread_new(mytestfunc, (void *)&arg1, sizeof(int), NULL);
+  int thid2 = Thread_new(mytestfunc, (void *)&arg2, sizeof(int), NULL);
+  int thid3 = Thread_new(myjointestfunc, (void *)&arg3, sizeof(int), NULL);
+  int thid4 = Thread_new(mytestfunc, (void *)&arg4, sizeof(int), NULL);
+  Thread_join(0);
+  // Thread_pause();
+  printf("Returned to main successfully\n");
+}

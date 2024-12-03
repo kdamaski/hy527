@@ -52,7 +52,7 @@ void *worker_thread(void *arg) {
 
     // Read HTTP request
     read(req->client_socket, buffer, BUFFER_SIZE);
-    printf("Received request:\n%s\n", buffer);
+    // printf("Received request:\n%s\n", buffer);
 
     // Send HTTP response
     const char *response = "HTTP/1.1 200 OK\r\n"

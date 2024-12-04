@@ -1,5 +1,5 @@
 // #include "misc.h" was prompting error conflicting types
-#include "thread.h"
+#include "uthread.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>

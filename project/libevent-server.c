@@ -15,64 +15,126 @@
 #define BACKLOG 128
 #define BUFFER_SIZE 4096
 
+void echo_write_cb(struct bufferevent *bev, void *ctx) {
+  // Clean up once data is written
+  bufferevent_free(bev);
+}
+
 void echo_read_cb(struct bufferevent *bev, void *ctx) {
   struct evbuffer *input = bufferevent_get_input(bev);
   struct evbuffer *output = bufferevent_get_output(bev);
 
-  // Read the request
+  // Read the request line
   char *request = evbuffer_readln(input, NULL, EVBUFFER_EOL_CRLF);
   if (!request) {
+    evbuffer_add_printf(
+        output, "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+    bufferevent_disable(bev, EV_READ | EV_WRITE);
+    bufferevent_free(bev);
     return;
   }
 
-  // Check if the request is for /large_file
-  if (strstr(request, "GET /large_file")) {
-    const char *headers = "HTTP/1.1 200 OK\r\n"
-                          "Content-Type: application/octet-stream\r\n"
-                          "Content-Length: %ld\r\n"
-                          "Connection: close\r\n\r\n";
+  // Parse the request
+  char method[16];
+  char uri[256];
+  char protocol[16];
 
-    char file_path[] = "largefile0";
-    FILE *file = fopen(file_path, "rb");
-    if (!file) {
-      evbuffer_add_printf(output, "HTTP/1.1 500 Internal Server Error\r\n\r\n");
+  if (sscanf(request, "%15s %255s %15s", method, uri, protocol) != 3) {
+    evbuffer_add_printf(
+        output, "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+    free(request);
+    bufferevent_disable(bev, EV_READ | EV_WRITE);
+    bufferevent_free(bev);
+    return;
+  }
+
+  // Only handle GET requests
+  if (strcasecmp(method, "GET") != 0) {
+    evbuffer_add_printf(
+        output, "HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n");
+    free(request);
+    bufferevent_disable(bev, EV_READ | EV_WRITE);
+    bufferevent_free(bev);
+    return;
+  }
+
+  if (strcmp(uri, "/") == 0) {
+    // Serve a simple response for the root URI
+    evbuffer_add_printf(output, "HTTP/1.1 200 OK\r\n"
+                                "Content-Type: text/plain\r\n"
+                                "Content-Length: 13\r\n"
+                                "Connection: close\r\n\r\n"
+                                "Hello, World!");
+  } else if (strcmp(uri, "/large_file") == 0) {
+    // Serve the large file
+    const char *file_path = "largefile0";
+    int fd = open(file_path, O_RDONLY);
+    if (fd < 0) {
+      evbuffer_add_printf(
+          output,
+          "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n");
       free(request);
       return;
     }
 
-    // Get file size
-    fseek(file, 0, SEEK_END);
-    long file_size = ftell(file);
-    rewind(file);
+    // Get the file size
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+      evbuffer_add_printf(
+          output,
+          "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n");
+      close(fd);
+      free(request);
+      return;
+    }
+    size_t file_size = st.st_size;
 
-    // Write headers to output buffer
-    evbuffer_add_printf(output, headers, file_size);
-
-    // Write file content to output buffer
-    char buffer[BUFFER_SIZE];
-    size_t bytes_read;
-    while ((bytes_read = fread(buffer, 1, BUFFER_SIZE, file)) > 0) {
-      evbuffer_add(output, buffer, bytes_read);
+    // Memory-map the file
+    char *file_data = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (file_data == MAP_FAILED) {
+      evbuffer_add_printf(
+          output,
+          "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n");
+      close(fd);
+      free(request);
+      return;
     }
 
-    fclose(file);
+    // Send headers
+    evbuffer_add_printf(output,
+                        "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: application/octet-stream\r\n"
+                        "Content-Length: %ld\r\n"
+                        "Connection: close\r\n\r\n",
+                        file_size);
+
+    // Send file content
+    evbuffer_add(output, file_data, file_size);
+
+    // Clean up
+    munmap(file_data, file_size);
+    close(fd);
   } else {
-    evbuffer_add_printf(output, "HTTP/1.1 404 Not Found\r\n\r\n");
+    // Handle 404 for unknown URIs
+    evbuffer_add_printf(output,
+                        "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
   }
+
+  // Ensure the response is sent before freeing
+  bufferevent_setcb(bev, NULL, NULL, NULL, NULL);
 
   free(request);
   bufferevent_disable(bev, EV_READ | EV_WRITE);
-  bufferevent_free(bev);
+  bufferevent_setcb(bev, NULL, echo_write_cb, NULL,
+                    NULL);           // Register write callback
+  bufferevent_enable(bev, EV_WRITE); // Ensure write is enabled
 }
 
 // Callback for event errors or connection close
 void echo_event_cb(struct bufferevent *bev, short events, void *ctx) {
-  // if (events & BEV_EVENT_ERROR) {
-  //   perror("Error on connection");
-  // }
-  // if (events & BEV_EVENT_EOF) {
-  //   printf("Client disconnected\n");
-  // }
+  if (events & BEV_EVENT_ERROR) {
+    perror("Error on connection");
+  }
   bufferevent_free(bev);
 }
 

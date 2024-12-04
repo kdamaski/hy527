@@ -13,7 +13,7 @@
 
 #define PORT 9999
 #define BACKLOG 128
-#define BUFFER_SIZE 4096
+#define BUFFER_SIZE 8192
 
 void echo_write_cb(struct bufferevent *bev, void *ctx) {
   // Clean up once data is written

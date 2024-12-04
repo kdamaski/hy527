@@ -12,7 +12,7 @@
 
 #define PORT 9999
 #define MAX_THREADS 100
-#define BUFFER_SIZE 4096
+#define BUFFER_SIZE 8192
 
 void handle_client(int client_socket);
 void *thread_function(void *arg);
@@ -73,8 +73,8 @@ int main() {
       close(client_socket);
       free(client_sock_ptr);
     }
-    pthread_detach(
-        thread); // Automatically clean up the thread after it finishes
+    // Automatically clean up the thread after it finishes
+    pthread_detach(thread);
   }
 
   close(server_fd);
@@ -131,7 +131,7 @@ void handle_client(int client_socket) {
 
   } else if (strcmp(uri, "/large_file") == 0) {
     // Respond with the large file
-    const char *file_path = "large_file.txt";
+    const char *file_path = "largefile0";
     int fd = open(file_path, O_RDONLY);
     if (fd < 0) {
       const char *response =

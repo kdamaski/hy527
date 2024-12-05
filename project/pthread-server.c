@@ -11,8 +11,9 @@
 #include <unistd.h>
 
 #define PORT 9999
-#define MAX_THREADS 100
-#define BUFFER_SIZE 8192
+#define MAX_THREADS 96
+#define RCV_SIZE 512
+#define SND_SIZE 16384
 
 void handle_client(int client_socket);
 void *thread_function(void *arg);
@@ -92,7 +93,7 @@ void *thread_function(void *arg) {
 }
 
 void handle_client(int client_socket) {
-  char buffer[BUFFER_SIZE];
+  char buffer[RCV_SIZE];
   ssize_t read_size;
 
   // Read the client's request
@@ -152,7 +153,7 @@ void handle_client(int client_socket) {
     size_t file_size = st.st_size;
 
     // Send HTTP headers
-    char headers[BUFFER_SIZE];
+    char headers[SND_SIZE];
     snprintf(headers, sizeof(headers),
              "HTTP/1.1 200 OK\r\n"
              "Content-Type: application/octet-stream\r\n"

@@ -8,7 +8,7 @@
 
 #define PORT 9999
 #define THREAD_POOL_SIZE 4
-#define BUFFER_SIZE 4096
+#define BUFFER_SIZE 16384
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;

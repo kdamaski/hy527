@@ -1,173 +1,191 @@
-#include <event2/buffer.h>
-#include <event2/bufferevent.h>
-#include <event2/event.h>
-#include <event2/listener.h>
+#define _GNU_SOURCE
+// #include <errno.h>
 #include <fcntl.h>
+#include <libaio.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
+#include <sys/epoll.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #define PORT 9999
-#define BACKLOG 128
+#define MAX_EVENTS 32768
 #define BUFFER_SIZE 8192
 
-void echo_write_cb(struct bufferevent *bev, void *ctx) {
-  // Clean up once data is written
-  bufferevent_free(bev);
+typedef struct {
+  int client_fd;
+  int file_fd;
+  char *buffer;
+  off_t offset;
+  size_t file_size;
+} client_context_t;
+
+void error_exit(const char *msg) {
+  perror(msg);
+  exit(EXIT_FAILURE);
 }
 
-void echo_read_cb(struct bufferevent *bev, void *ctx) {
-  struct evbuffer *input = bufferevent_get_input(bev);
-  struct evbuffer *output = bufferevent_get_output(bev);
+int setup_server_socket() {
+  int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (server_fd == -1)
+    error_exit("socket");
 
-  // Read the request line
-  char *request = evbuffer_readln(input, NULL, EVBUFFER_EOL_CRLF);
-  if (!request) {
-    evbuffer_add_printf(
-        output, "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
-    bufferevent_disable(bev, EV_READ | EV_WRITE);
-    bufferevent_free(bev);
+  int opt = 1;
+  if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1)
+    error_exit("setsockopt");
+
+  struct sockaddr_in server_addr = {
+      .sin_family = AF_INET,
+      .sin_addr.s_addr = INADDR_ANY,
+      .sin_port = htons(PORT),
+  };
+
+  if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) ==
+      -1)
+    error_exit("bind");
+
+  if (listen(server_fd, 10) == -1)
+    error_exit("listen");
+
+  return server_fd;
+}
+
+void handle_large_file(io_context_t ctx, client_context_t *context) {
+  struct iocb cb, *cbs[1];
+  memset(&cb, 0, sizeof(cb));
+
+  cb.aio_fildes = context->file_fd;
+  io_prep_pread(&cb, context->file_fd, context->buffer, BUFFER_SIZE,
+                context->offset);
+
+  cbs[0] = &cb;
+
+  int ret = io_submit(ctx, 1, cbs);
+  if (ret < 0)
+    error_exit("io_submit");
+
+  struct io_event events[1];
+  ret = io_getevents(ctx, 1, 1, events, NULL);
+  if (ret < 0)
+    error_exit("io_getevents");
+
+  ssize_t bytes_read = events[0].res;
+  if (bytes_read <= 0) {
+    close(context->file_fd);
+    close(context->client_fd);
+    free(context->buffer);
+    free(context);
     return;
   }
 
-  // Parse the request
-  char method[16];
-  char uri[256];
-  char protocol[16];
+  context->offset += bytes_read;
+  ssize_t bytes_sent = send(context->client_fd, context->buffer, bytes_read, 0);
 
-  if (sscanf(request, "%15s %255s %15s", method, uri, protocol) != 3) {
-    evbuffer_add_printf(
-        output, "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
-    free(request);
-    bufferevent_disable(bev, EV_READ | EV_WRITE);
-    bufferevent_free(bev);
+  if (bytes_sent <= 0) {
+    perror("Error sending data");
+    close(context->file_fd);
+    close(context->client_fd);
+    free(context->buffer);
+    free(context);
     return;
   }
 
-  // Only handle GET requests
-  if (strcasecmp(method, "GET") != 0) {
-    evbuffer_add_printf(
-        output, "HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n");
-    free(request);
-    bufferevent_disable(bev, EV_READ | EV_WRITE);
-    bufferevent_free(bev);
-    return;
+  // Update offset only after successful send
+  context->offset += bytes_sent;
+
+  if (context->offset >= context->file_size) {
+    close(context->file_fd);
+    close(context->client_fd);
+    free(context->buffer);
+    free(context);
   }
-
-  if (strcmp(uri, "/") == 0) {
-    // Serve a simple response for the root URI
-    evbuffer_add_printf(output, "HTTP/1.1 200 OK\r\n"
-                                "Content-Type: text/plain\r\n"
-                                "Content-Length: 13\r\n"
-                                "Connection: close\r\n\r\n"
-                                "Hello, World!");
-  } else if (strcmp(uri, "/large_file") == 0) {
-    // Serve the large file
-    const char *file_path = "largefile0";
-    int fd = open(file_path, O_RDONLY);
-    if (fd < 0) {
-      evbuffer_add_printf(
-          output,
-          "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n");
-      free(request);
-      return;
-    }
-
-    // Get the file size
-    struct stat st;
-    if (fstat(fd, &st) < 0) {
-      evbuffer_add_printf(
-          output,
-          "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n");
-      close(fd);
-      free(request);
-      return;
-    }
-    size_t file_size = st.st_size;
-
-    // Memory-map the file
-    char *file_data = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (file_data == MAP_FAILED) {
-      evbuffer_add_printf(
-          output,
-          "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n");
-      close(fd);
-      free(request);
-      return;
-    }
-
-    // Send headers
-    evbuffer_add_printf(output,
-                        "HTTP/1.1 200 OK\r\n"
-                        "Content-Type: application/octet-stream\r\n"
-                        "Content-Length: %ld\r\n"
-                        "Connection: close\r\n\r\n",
-                        file_size);
-
-    // Send file content
-    evbuffer_add(output, file_data, file_size);
-
-    // Clean up
-    munmap(file_data, file_size);
-    close(fd);
-  } else {
-    // Handle 404 for unknown URIs
-    evbuffer_add_printf(output,
-                        "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
-  }
-
-  // Ensure the response is sent before freeing
-  bufferevent_setcb(bev, NULL, NULL, NULL, NULL);
-
-  free(request);
-  bufferevent_disable(bev, EV_READ | EV_WRITE);
-  bufferevent_setcb(bev, NULL, echo_write_cb, NULL,
-                    NULL);           // Register write callback
-  bufferevent_enable(bev, EV_WRITE); // Ensure write is enabled
 }
 
-// Callback for event errors or connection close
-void echo_event_cb(struct bufferevent *bev, short events, void *ctx) {
-  if (events & BEV_EVENT_ERROR) {
-    perror("Error on connection");
-  }
-  bufferevent_free(bev);
-}
+void event_loop(int server_fd) {
+  int epoll_fd = epoll_create1(0);
+  if (epoll_fd == -1)
+    error_exit("epoll_create1");
 
-// Accept new connections and set up callbacks
-void accept_cb(struct evconnlistener *listener, evutil_socket_t fd,
-               struct sockaddr *address, int socklen, void *ctx) {
-  struct event_base *base = (struct event_base *)ctx;
-  struct bufferevent *bev =
-      bufferevent_socket_new(base, fd, BEV_OPT_CLOSE_ON_FREE);
-  bufferevent_setcb(bev, echo_read_cb, NULL, echo_event_cb, NULL);
-  bufferevent_enable(bev, EV_READ | EV_WRITE);
+  struct epoll_event event, events[MAX_EVENTS];
+  event.events = EPOLLIN;
+  event.data.fd = server_fd;
+  if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &event) == -1)
+    error_exit("epoll_ctl");
+
+  io_context_t ctx;
+  memset(&ctx, 0, sizeof(io_context_t));
+  if (io_setup(MAX_EVENTS, &ctx) < 0)
+    error_exit("io_setup");
+
+  while (1) {
+    int num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+    if (num_events < 0)
+      error_exit("epoll_wait");
+
+    for (int i = 0; i < num_events; ++i) {
+      if (events[i].data.fd == server_fd) {
+        struct sockaddr_in client_addr;
+        socklen_t addr_len = sizeof(client_addr);
+        int client_fd =
+            accept(server_fd, (struct sockaddr *)&client_addr, &addr_len);
+        if (client_fd == -1)
+          error_exit("accept");
+
+        // printf("Accepted connection: %d\n", client_fd);
+        struct epoll_event client_event = {
+            .events = EPOLLIN,
+            .data.fd = client_fd,
+        };
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &client_event) == -1)
+          error_exit("epoll_ctl client_fd");
+      } else {
+        int client_fd = events[i].data.fd;
+
+        char request[1024];
+        ssize_t len = recv(client_fd, request, sizeof(request), 0);
+        if (len <= 0) {
+          close(client_fd);
+          continue;
+        }
+
+        if (strncmp(request, "GET /large_file", 15) == 0) {
+          int file_fd = open("largefile0", O_RDONLY);
+          if (file_fd < 0)
+            error_exit("open large_file");
+
+          off_t file_size = lseek(file_fd, 0, SEEK_END);
+          lseek(file_fd, 0, SEEK_SET);
+
+          client_context_t *context = calloc(1, sizeof(client_context_t));
+          context->client_fd = client_fd;
+          context->file_fd = file_fd;
+          context->buffer = malloc(BUFFER_SIZE);
+          context->offset = 0;
+          context->file_size = file_size;
+
+          handle_large_file(ctx, context);
+        } else {
+          const char *response =
+              "HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nHello, World!";
+          send(client_fd, response, strlen(response), 0);
+          close(client_fd);
+        }
+      }
+    }
+  }
+
+  io_destroy(ctx);
+  close(epoll_fd);
 }
 
 int main() {
-  struct event_base *base = event_base_new();
-  struct sockaddr_in sin;
-  sin.sin_family = AF_INET;
-  sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  sin.sin_port = htons(PORT);
-
-  struct evconnlistener *listener = evconnlistener_new_bind(
-      base, accept_cb, base, LEV_OPT_REUSEABLE | LEV_OPT_CLOSE_ON_FREE, BACKLOG,
-      (struct sockaddr *)&sin, sizeof(sin));
-
-  if (!listener) {
-    perror("Could not create a listener");
-    return 1;
-  }
-
-  printf("Starting event loop\n");
-  event_base_dispatch(base);
-  printf("Event loop exited\n");
-  evconnlistener_free(listener);
-  event_base_free(base);
+  int server_fd = setup_server_socket();
+  printf("Server listening on port %d\n", PORT);
+  event_loop(server_fd);
+  close(server_fd);
   return 0;
 }
+

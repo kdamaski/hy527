@@ -1,14 +1,19 @@
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define PORT 9999
 #define THREAD_POOL_SIZE 4
-#define BUFFER_SIZE 16384
+#define RCV_SIZE 512
+#define SND_SIZE 16384
+#define REQ_SIZE 65536
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
@@ -18,14 +23,14 @@ typedef struct {
   struct sockaddr_in client_addr;
 } client_request;
 
-client_request *queue[BUFFER_SIZE];
+client_request *queue[REQ_SIZE];
 int queue_size = 0;
 int head = 0, tail = 0;
 
 void enqueue(client_request *req) {
   pthread_mutex_lock(&lock);
   queue[tail] = req;
-  tail = (tail + 1) % BUFFER_SIZE;
+  tail = (tail + 1) % REQ_SIZE;
   queue_size++;
   pthread_cond_signal(&cond);
   pthread_mutex_unlock(&lock);
@@ -37,37 +42,103 @@ client_request *dequeue() {
     pthread_cond_wait(&cond, &lock);
   }
   client_request *req = queue[head];
-  head = (head + 1) % BUFFER_SIZE;
+  head = (head + 1) % REQ_SIZE;
   queue_size--;
   pthread_mutex_unlock(&lock);
   return req;
 }
 
 void *worker_thread(void *arg) {
+  // TODO initialize the local uthread pool
+
   while (1) {
     client_request *req = dequeue();
 
-    char buffer[BUFFER_SIZE];
-    memset(buffer, 0, BUFFER_SIZE);
+    char buffer[RCV_SIZE];
+    // memset(buffer, 0, RCV_SIZE);
 
     // Read HTTP request
-    read(req->client_socket, buffer, BUFFER_SIZE);
+    read(req->client_socket, buffer, RCV_SIZE);
     // printf("Received request:\n%s\n", buffer);
+    char method[16], uri[256], protocol[16];
+    if (sscanf(buffer, "%15s %255s %15s", method, uri, protocol) != 3) {
+      const char *response =
+          "HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n";
+      send(req->client_socket, response, strlen(response), 0);
+      return NULL;
+    }
 
-    // Send HTTP response
-    const char *response = "HTTP/1.1 200 OK\r\n"
-                           "Content-Type: text/plain\r\n"
-                           "Content-Length: 13\r\n"
-                           "Connection: close\r\n"
-                           "\r\n"
-                           "Hello, World!";
-    write(req->client_socket, response, strlen(response));
+    // Only handle GET requests
+    if (strcasecmp(method, "GET") != 0) {
+      const char *response =
+          "HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n";
+      send(req->client_socket, response, strlen(response), 0);
+      return NULL;
+    }
 
-    // Close the connection
-    close(req->client_socket);
-    free(req);
+    // Handle the request based on URI
+    if (strcmp(uri, "/") == 0) {
+      // Respond with "Hello, World!"
+      const char *response = "HTTP/1.1 200 OK\r\n"
+                             "Content-Type: text/plain\r\n"
+                             "Content-Length: 13\r\n"
+                             "Connection: close\r\n\r\n"
+                             "Hello, World!";
+      send(req->client_socket, response, strlen(response), 0);
+
+    } else if (strcmp(uri, "/large_file") == 0) {
+      // Respond with the large file
+      const char *file_path = "largefile0";
+      int fd = open(file_path, O_RDONLY);
+      if (fd < 0) {
+        const char *response =
+            "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n";
+        send(req->client_socket, response, strlen(response), 0);
+        return NULL;
+      }
+
+      // Get the file size
+      struct stat st;
+      if (fstat(fd, &st) < 0) {
+        close(fd);
+        const char *response =
+            "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n";
+        send(req->client_socket, response, strlen(response), 0);
+        return NULL;
+      }
+      size_t file_size = st.st_size;
+
+      // Send HTTP headers
+      char headers[SND_SIZE];
+      snprintf(headers, sizeof(headers),
+               "HTTP/1.1 200 OK\r\n"
+               "Content-Type: application/octet-stream\r\n"
+               "Content-Length: %ld\r\n"
+               "Connection: close\r\n\r\n",
+               file_size);
+      send(req->client_socket, headers, strlen(headers), 0);
+
+      // Send the file content
+      char *file_data = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+      if (file_data == MAP_FAILED) {
+        close(fd);
+        const char *response =
+            "HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n";
+        send(req->client_socket, response, strlen(response), 0);
+        return NULL;
+      }
+      send(req->client_socket, file_data, file_size, 0);
+
+      munmap(file_data, file_size);
+      close(fd);
+
+    } else {
+      // Respond with 404 Not Found
+      const char *response =
+          "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n";
+      send(req->client_socket, response, strlen(response), 0);
+    }
   }
-  return NULL;
 }
 
 int main() {
@@ -102,6 +173,7 @@ int main() {
     pthread_create(&threads[i], NULL, worker_thread, NULL);
   }
 
+  unsigned i = 0;
   while (1) {
     struct sockaddr_in client_addr;
     socklen_t addr_len = sizeof(client_addr);

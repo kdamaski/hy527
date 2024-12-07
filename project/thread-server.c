@@ -173,7 +173,6 @@ int main() {
     pthread_create(&threads[i], NULL, worker_thread, NULL);
   }
 
-  unsigned i = 0;
   while (1) {
     struct sockaddr_in client_addr;
     socklen_t addr_len = sizeof(client_addr);

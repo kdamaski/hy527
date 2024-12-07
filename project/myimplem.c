@@ -1,6 +1,7 @@
+#include "thread-server.h"
 #include <errno.h>
-#include <fcntl.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,48 +13,18 @@
 #include <unistd.h>
 
 #define PORT 9999
-#define MAX_EVENTS 1024
-#define MAX_CLIENTS 2048
-#define CHUNK_SIZE 131072
-
-// Connection context to store file descriptor and offset
-typedef struct {
-  int client_fd;
-  int file_fd;
-  off_t offset;
-} connection_context;
-
-connection_context contexts[MAX_CLIENTS] = {0};
-
-// Find an available context slot
-connection_context *get_context(int client_fd, int file_fd) {
-  for (int i = 0; i < MAX_CLIENTS; i++) {
-    if (contexts[i].client_fd == 0) {
-      contexts[i].client_fd = client_fd;
-      contexts[i].file_fd = file_fd;
-      return &contexts[i];
-    }
-  }
-  return NULL; // No available context
-}
-
-// Free the context when the client disconnects
-void free_context(int client_fd) {
-  for (int i = 0; i < MAX_CLIENTS; i++) {
-    if (contexts[i].client_fd == client_fd) {
-      close(contexts[i].file_fd); // Close the file descriptor
-      contexts[i].client_fd = 0;
-      contexts[i].file_fd = 0;
-      contexts[i].offset = 0;
-      break;
-    }
-  }
-}
+#define THREAD_POOL_SIZE 4
 
 int main() {
   int server_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (server_fd == -1) {
     perror("socket creation failed");
+    exit(EXIT_FAILURE);
+  }
+
+  int opt = 1;
+  if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+    perror("setsockopt failed");
     exit(EXIT_FAILURE);
   }
 
@@ -96,6 +67,8 @@ int main() {
 
   // Main event loop
   struct epoll_event events[MAX_EVENTS];
+
+  printf("Server listening on port %d\n", PORT);
   while (1) {
     int nfds = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
     if (nfds == -1) {
@@ -154,7 +127,7 @@ int main() {
               }
 
               // Initialize connection context
-              connection_context *ctx = get_context(client_fd, file_fd);
+              connection_context *ctx = add_context(client_fd, file_fd);
               if (!ctx) {
                 perror("No available context slots");
                 close(client_fd);
@@ -182,18 +155,11 @@ int main() {
           } else if (n == 0) {
             // Client disconnected
             close(client_fd);
-            free_context(client_fd);
+            rm_context(client_fd);
           }
         } else if (events[i].events & EPOLLOUT) {
           // Retrieve context
-          connection_context *ctx = NULL;
-          for (int j = 0; j < MAX_CLIENTS; j++) {
-            if (contexts[j].client_fd == client_fd) {
-              ctx = &contexts[j];
-              break;
-            }
-          }
-
+          connection_context *ctx = get_context(client_fd);
           if (!ctx)
             continue; // No context found, skip
 
@@ -206,7 +172,7 @@ int main() {
           } else if (bytes_sent == 0 || errno == EPIPE) {
             // Transfer complete or client disconnected
             close(client_fd);
-            free_context(client_fd); // Free the context
+            rm_context(client_fd); // Free the context
           } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
             // Wait for socket to become writable again, no need to retry
             // immediately
@@ -216,7 +182,7 @@ int main() {
             // Unexpected error, clean up and close the connection
             perror("Error sending file with sendfile");
             close(client_fd);
-            free_context(client_fd);
+            rm_context(client_fd);
           }
         }
       }

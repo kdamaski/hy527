@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define DIM 6500
+#define DIM 2000
 #define NUM 6
 
 double randfrom(double min, double max) {

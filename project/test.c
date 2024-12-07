@@ -12,24 +12,25 @@
 #include <unistd.h>
 
 #define PORT 9999
-#define MAX_EVENTS 10
-#define MAX_CLIENTS 100
-#define CHUNK_SIZE 4096
+#define MAX_EVENTS 1024
+#define MAX_CLIENTS 2048
+#define CHUNK_SIZE 131072
 
 // Connection context to store file descriptor and offset
 typedef struct {
   int client_fd;
   int file_fd;
-  off_t offset; // File offset for sendfile()
+  off_t offset;
 } connection_context;
 
 connection_context contexts[MAX_CLIENTS] = {0};
 
 // Find an available context slot
-connection_context *get_context(int client_fd) {
+connection_context *get_context(int client_fd, int file_fd) {
   for (int i = 0; i < MAX_CLIENTS; i++) {
     if (contexts[i].client_fd == 0) {
       contexts[i].client_fd = client_fd;
+      contexts[i].file_fd = file_fd;
       return &contexts[i];
     }
   }
@@ -120,7 +121,7 @@ int main() {
             buf[n] = '\0'; // Null-terminate the received string
             if (strstr(buf, "GET /large_file") != NULL) {
               // Open the requested file
-              int file_fd = open("largefile0", O_RDONLY);
+              int file_fd = open("./largefile0", O_RDONLY);
               if (file_fd < 0) {
                 perror("Failed to open file");
                 close(client_fd);
@@ -153,7 +154,7 @@ int main() {
               }
 
               // Initialize connection context
-              connection_context *ctx = get_context(client_fd);
+              connection_context *ctx = get_context(client_fd, file_fd);
               if (!ctx) {
                 perror("No available context slots");
                 close(client_fd);
@@ -196,22 +197,26 @@ int main() {
           if (!ctx)
             continue; // No context found, skip
 
-          // Send file content using sendfile
+          // Use sendfile() to send file content
           ssize_t bytes_sent =
               sendfile(client_fd, ctx->file_fd, &ctx->offset, CHUNK_SIZE);
-          if (bytes_sent <= 0) {
-            if (bytes_sent == 0 || errno == EPIPE) {
-              // Transfer complete or client disconnected
-              close(client_fd);
-              free_context(client_fd);
-            }
+          if (bytes_sent > 0) {
+            // Data sent successfully, continue
+            continue;
+          } else if (bytes_sent == 0 || errno == EPIPE) {
+            // Transfer complete or client disconnected
+            close(client_fd);
+            free_context(client_fd); // Free the context
           } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            // Resource temporarily unavailable, retry later
+            // Wait for socket to become writable again, no need to retry
+            // immediately
+            fprintf(stderr, "Socket buffer full, waiting for EPOLLOUT\n");
             continue;
           } else {
+            // Unexpected error, clean up and close the connection
             perror("Error sending file with sendfile");
             close(client_fd);
-            free_context(client_fd); // Free the context on error
+            free_context(client_fd);
           }
         }
       }

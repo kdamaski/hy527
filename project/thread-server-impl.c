@@ -266,7 +266,7 @@ void *work(void *arg) {
               sendfile(client_fd, ctx->file_fd, &ctx->offset, CHUNK_SIZE);
           if (bytes_sent == 0 || errno == EPIPE) {
             // Transfer complete or client disconnected
-            fprintf(stderr, "File transfer complete for fd %d\n", client_fd);
+            // fprintf(stderr, "File transfer complete for fd %d\n", client_fd);
             close(client_fd);
             rm_context(client_fd);
           } else if (bytes_sent < 0) {
@@ -303,7 +303,7 @@ int main() {
     exit(EXIT_FAILURE);
   }
 
-  if (listen(server_fd, 10) < 0) {
+  if (listen(server_fd, 16) < 0) {
     perror("Listen failed");
     exit(EXIT_FAILURE);
   }

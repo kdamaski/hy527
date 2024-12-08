@@ -1,7 +1,6 @@
 #include "thread-server.h"
 #include <errno.h>
 #include <netinet/in.h>
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,7 +12,6 @@
 #include <unistd.h>
 
 #define PORT 9999
-#define THREAD_POOL_SIZE 4
 
 int main() {
   int server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -28,7 +26,7 @@ int main() {
     exit(EXIT_FAILURE);
   }
 
-  if (fcntl(server_fd, F_SETFL, O_NONBLOCK) == -1) {
+  if (fcntl(server_fd, F_SETFL, O_NONBLOCK | O_CLOEXEC) == -1) {
     perror("fcntl: set non-blocking");
     close(server_fd);
     exit(EXIT_FAILURE);
@@ -44,7 +42,7 @@ int main() {
     exit(EXIT_FAILURE);
   }
 
-  if (listen(server_fd, 10) == -1) {
+  if (listen(server_fd, 16) == -1) {
     perror("listen failed");
     close(server_fd);
     exit(EXIT_FAILURE);
@@ -80,7 +78,7 @@ int main() {
       if (events[i].data.fd == server_fd) {
         // Accept new connection
         int client_fd = accept(server_fd, NULL, NULL);
-        fcntl(client_fd, F_SETFL, O_NONBLOCK);
+        fcntl(client_fd, F_SETFL, O_NONBLOCK | O_CLOEXEC);
 
         ev.events = EPOLLIN;
         ev.data.fd = client_fd;
@@ -94,7 +92,8 @@ int main() {
             buf[n] = '\0'; // Null-terminate the received string
             if (strstr(buf, "GET /large_file") != NULL) {
               // Open the requested file
-              int file_fd = open("./largefile0", O_RDONLY);
+              int file_fd =
+                  open("./largefile0", O_NONBLOCK | O_RDONLY | O_CLOEXEC);
               if (file_fd < 0) {
                 perror("Failed to open file");
                 close(client_fd);

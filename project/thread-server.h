@@ -1,8 +1,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 
-#define MAX_EVENTS 512
-#define CONTEXT_SZ 307
+#define CONTEXT_SZ 203
 #define CHUNK_SIZE 131072
 #define NUM_THREADS 4
 

@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #define PORT 9999
+#define MAX_EVENTS 128
 
 connection_context contexts[CONTEXT_SZ] = {0};
 
@@ -108,7 +109,11 @@ void distribute_to_worker(int client_fd) {
   next_worker = (next_worker + 1) % NUM_THREADS;
 
   // Pass the client_fd to the worker via its event pipe
-  write(workers[worker_index].event_pipe[1], &client_fd, sizeof(client_fd));
+  if (write(workers[worker_index].event_pipe[1], &client_fd,
+            sizeof(client_fd)) == -1) {
+    perror("Failed to write fd into workers' event pipe");
+    exit(EXIT_FAILURE);
+  }
 }
 
 void initialize_workers() {
@@ -119,6 +124,7 @@ void initialize_workers() {
       exit(EXIT_FAILURE);
     }
 
+    fcntl(workers[i].epoll_fd, F_SETFL, O_NONBLOCK);
     // Create a pipe for passing events to the worker
     if (pipe(workers[i].event_pipe) < 0) {
       perror("Failed to create event pipe");
@@ -127,7 +133,7 @@ void initialize_workers() {
 
     // Add the pipe's read end to the worker's epoll instance
     struct epoll_event ev;
-    ev.events = EPOLLIN;
+    ev.events = EPOLLIN | EPOLLET;
     ev.data.fd = workers[i].event_pipe[0];
     epoll_ctl(workers[i].epoll_fd, EPOLL_CTL_ADD, workers[i].event_pipe[0],
               &ev);
@@ -148,7 +154,8 @@ void *work(void *arg) {
       continue;
     }
     for (int i = 0; i < nfds; i++) {
-      if (events[i].data.fd == worker->event_pipe[0]) {
+      if (events[i].data.fd ==
+          worker->event_pipe[0]) { // If we have new message in the local queue
         // New client_fd from the main thread
         int client_fd;
         if (read(worker->event_pipe[0], &client_fd, sizeof(client_fd)) !=

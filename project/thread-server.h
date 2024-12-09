@@ -1,7 +1,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 
-#define CONTEXT_SZ 203
+#define CONTEXT_SZ 207
 #define CHUNK_SIZE 131072
 #define NUM_THREADS 4
 

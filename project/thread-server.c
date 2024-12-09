@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #define PORT 9999
-#define MAX_EVENTS 128
+#define MAX_EVENTS 256
 
 connection_context contexts[CONTEXT_SZ] = {0};
 
@@ -133,7 +133,7 @@ void initialize_workers() {
 
     // Add the pipe's read end to the worker's epoll instance
     struct epoll_event ev;
-    ev.events = EPOLLIN | EPOLLET;
+    ev.events = EPOLLIN;
     ev.data.fd = workers[i].event_pipe[0];
     epoll_ctl(workers[i].epoll_fd, EPOLL_CTL_ADD, workers[i].event_pipe[0],
               &ev);
@@ -164,7 +164,7 @@ void *work(void *arg) {
           continue;
         }
 
-        ev.events = EPOLLIN | EPOLLET;
+        ev.events = EPOLLIN;
         ev.data.fd = client_fd;
         if (epoll_ctl(worker->epoll_fd, EPOLL_CTL_ADD, client_fd, &ev) == -1) {
           perror("epoll_ctl: add client_fd");
@@ -213,7 +213,7 @@ void *work(void *arg) {
                        "Content-Length: %ld\r\n"
                        "Connection: close\r\n\r\n",
                        file_size);
-              if (send(client_fd, header, strlen(header), 0) == -1) {
+              if (send(client_fd, header, strlen(header), 0) <= 0) {
                 perror("Failed to send HTTP header");
                 close(client_fd);
                 close(file_fd);
@@ -259,7 +259,7 @@ void *work(void *arg) {
             rm_context(client_fd);
           }
         }
-
+        // if there is a large_file to be sent
         if (events[i].events & EPOLLOUT) {
           connection_context *ctx = get_context(client_fd);
           if (!ctx) {

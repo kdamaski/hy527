@@ -243,13 +243,6 @@ int u_thread_work(void *arg) {
   }
 }
 
-struct uthread_queue *Thread_init();
-unsigned long Thread_new(int func(void *), void *args, long nbytes,
-                         struct uthread_queue *uq);
-int Thread_join(unsigned long tid, struct uthread_queue *uq);
-
-void Thread_pause(struct uthread_queue *uq);
-
 void *kthread_work(void *arg) {
   worker_thread *worker = (worker_thread *)arg;
   struct uthread_queue *uq = Thread_init();
@@ -283,7 +276,7 @@ int main() {
     exit(EXIT_FAILURE);
   }
 
-  if (listen(server_fd, 16) < 0) {
+  if (listen(server_fd, 20) < 0) {
     perror("Listen failed");
     exit(EXIT_FAILURE);
   }

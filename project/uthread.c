@@ -7,19 +7,6 @@
 
 #define KB 1024
 
-struct uthread_queue *Thread_init();
-
-unsigned long Thread_new(int func(void *), void *args, long nbytes,
-                         struct uthread_queue *uq);
-
-void Thread_exit(int code, struct uthread_queue *uq);
-
-int Thread_self(struct u_thread *curr_thr);
-
-int Thread_join(unsigned long tid, struct uthread_queue *uq);
-
-void Thread_pause(struct uthread_queue *uq);
-
 extern void _swtch(void *from, void *to);
 extern void _thrstart(void *arg, int func(void *));
 
@@ -36,7 +23,7 @@ struct uthread_queue *Thread_init(void) {
   assert(uq->ready_q);
   uq->ready_q->head = uq->ready_q->tail = NULL;
   // allocate the stack size for my user-level threads
-  uq->stack_size = 8 * KB;
+  uq->stack_size = 4 * KB;
 
   uq->main_thr = malloc(sizeof(struct u_thread));
   uq->main_thr->id = -1;

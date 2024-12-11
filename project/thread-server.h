@@ -4,8 +4,8 @@
 
 #define CONTEXT_SZ 179
 #define CHUNK_SIZE 65536
-#define NUM_THREADS 4
-#define NUM_UTHREADS 3
+#define NUM_THREADS 1
+#define NUM_UTHREADS 1
 
 typedef struct connection_context {
   int client_fd;

@@ -24,4 +24,11 @@ struct uthread_queue {
   unsigned n_threads;
 };
 
+struct uthread_queue *Thread_init();
+unsigned long Thread_new(int func(void *), void *args, long nbytes,
+                         struct uthread_queue *uq);
+int Thread_join(unsigned long tid, struct uthread_queue *uq);
+
+void Thread_pause(struct uthread_queue *uq);
+
 #endif

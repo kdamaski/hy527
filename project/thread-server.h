@@ -1,9 +1,11 @@
+#include "uthread.h"
 #include <fcntl.h>
 #include <pthread.h>
 
-#define CONTEXT_SZ 207
-#define CHUNK_SIZE 131072
+#define CONTEXT_SZ 179
+#define CHUNK_SIZE 65536
 #define NUM_THREADS 4
+#define NUM_UTHREADS 3
 
 typedef struct connection_context {
   int client_fd;
@@ -25,6 +27,7 @@ typedef struct worker_thread {
   int epoll_fd;      // epoll instance for this thread
   pthread_t thread;  // Thread ID
   int event_pipe[2]; // Pipe for passing new events to this worker
+  u_thread *uthreads[NUM_UTHREADS];
 } worker_thread;
 
 void initialize_workers();
@@ -32,4 +35,6 @@ void initialize_workers();
 void distribute_to_workers(int client_fd);
 
 // the worker function
-void *work(void *arg);
+void *kthread_work(void *arg);
+
+int u_thread_work(void *arg);

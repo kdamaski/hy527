@@ -11,28 +11,17 @@
 #include <unistd.h>
 
 #define PORT 9999
-#define MAX_EVENTS 256
+#define MAX_EVENTS 101
 
 connection_context contexts[CONTEXT_SZ] = {0};
 
 int hash_fd(int client_fd) { return (65537 * client_fd) % CONTEXT_SZ; }
 
 connection_context *get_context(int client_fd) {
-  // int hash = hash_fd(client_fd);
-
-  // // Search through the linked list at the hashed index
-  // connection_context *current = contexts[hash];
-  // while (current) {
-  //   if (current->client_fd == client_fd) {
-  //     return current; // Found the context
-  //   }
-  //   current = current->next;
-  // }
-  // return NULL;
   connection_context *ctx = NULL;
-  for (int j = 0; j < CONTEXT_SZ; j++) {
-    if (contexts[j].client_fd == client_fd) {
-      ctx = &contexts[j];
+  for (int i = 0; i < CONTEXT_SZ; i++) {
+    if (contexts[i].client_fd == client_fd) {
+      ctx = &contexts[i];
       break;
     }
   }
@@ -40,25 +29,6 @@ connection_context *get_context(int client_fd) {
 }
 
 connection_context *add_context(int client_fd, int file_fd) {
-  // connection_context *ctx = get_context(client_fd);
-  // if (ctx) {
-  //   // context exists
-  //   // printf("Context with client_fd = %d already exists\n", client_fd);
-  //   return ctx;
-  // }
-  // // If not found, create a new context
-  // ctx = malloc(sizeof(connection_context));
-  // if (!ctx) {
-  //   perror("Failed to allocate memory for connection_context");
-  //   return NULL;
-  // }
-  // int hash = hash_fd(client_fd);
-  // ctx->client_fd = client_fd;
-  // ctx->file_fd = file_fd;
-  // ctx->offset = 0;
-  // ctx->next = contexts[hash]; // Add to the head of the linked list
-  // contexts[hash] = ctx;
-  // return ctx;
   for (int i = 0; i < CONTEXT_SZ; i++) {
     if (contexts[i].client_fd == 0) {
       contexts[i].client_fd = client_fd;
@@ -70,24 +40,6 @@ connection_context *add_context(int client_fd, int file_fd) {
 }
 
 void rm_context(int client_fd) {
-  // int hash = hash_fd(client_fd);
-
-  // connection_context *current = contexts[hash];
-  // connection_context *prev = NULL;
-  // while (current) {
-  //   if (current->client_fd == client_fd) {
-  //     // Found the context to remove
-  //     if (prev) {
-  //       prev->next = current->next; // Skip over the current node
-  //     } else {
-  //       contexts[hash] = current->next; // Remove head of list
-  //     }
-  //     free(current); // Free memory
-  //     return;
-  //   }
-  //   prev = current;
-  //   current = current->next;
-  // }
   for (int i = 0; i < CONTEXT_SZ; i++) {
     if (contexts[i].client_fd == client_fd) {
       close(contexts[i].file_fd); // Close the file descriptor
@@ -118,13 +70,15 @@ void distribute_to_worker(int client_fd) {
 
 void initialize_workers() {
   for (int i = 0; i < NUM_THREADS; i++) {
+    // init per kernel thread local queue
     workers[i].epoll_fd = epoll_create1(0);
     if (workers[i].epoll_fd < 0) {
       perror("Failed to create epoll instance");
       exit(EXIT_FAILURE);
     }
 
-    fcntl(workers[i].epoll_fd, F_SETFL, O_NONBLOCK);
+    // make the fd non-blocking
+    fcntl(workers[i].epoll_fd, F_SETFL, O_NONBLOCK | O_CLOEXEC);
     // Create a pipe for passing events to the worker
     if (pipe(workers[i].event_pipe) < 0) {
       perror("Failed to create event pipe");
@@ -133,20 +87,20 @@ void initialize_workers() {
 
     // Add the pipe's read end to the worker's epoll instance
     struct epoll_event ev;
-    ev.events = EPOLLIN;
+    ev.events = EPOLLIN; // | EPOLLET;
     ev.data.fd = workers[i].event_pipe[0];
     epoll_ctl(workers[i].epoll_fd, EPOLL_CTL_ADD, workers[i].event_pipe[0],
               &ev);
 
     // Create the worker thread
-    pthread_create(&workers[i].thread, NULL, work, &workers[i]);
+    pthread_create(&workers[i].thread, NULL, kthread_work, &workers[i]);
   }
 }
 
-void *work(void *arg) {
+int u_thread_work(void *arg) {
   worker_thread *worker = (worker_thread *)arg;
-  struct epoll_event ev, events[MAX_EVENTS];
 
+  struct epoll_event ev, events[MAX_EVENTS];
   while (1) {
     int nfds = epoll_wait(worker->epoll_fd, events, MAX_EVENTS, -1);
     if (nfds < 0) {
@@ -172,18 +126,18 @@ void *work(void *arg) {
           continue;
         }
 
-        // fprintf(stderr, "Worker added client_fd %d\n", client_fd);
+        // fprintf(stderr, "curr_thr added client_fd %d\n", client_fd);
 
       } else {
         int client_fd = events[i].data.fd;
 
         if (events[i].events & EPOLLIN) {
-          char buf[1024];
+          char buf[512];
           int n = recv(client_fd, buf, sizeof(buf) - 1, 0);
 
           if (n > 0) {
             buf[n] = '\0'; // Null-terminate the received data
-            // printf("Worker received: %s\n", buf);
+            // printf("curr_thr received: %s\n", buf);
 
             if (strstr(buf, "GET /large_file") != NULL) {
               // Open the requested file
@@ -278,7 +232,7 @@ void *work(void *arg) {
             rm_context(client_fd);
           } else if (bytes_sent < 0) {
             if (errno != EAGAIN && errno != EWOULDBLOCK) {
-              perror("sendfile failed");
+              // perror("sendfile failed");
               close(client_fd);
               rm_context(client_fd);
             }
@@ -287,6 +241,25 @@ void *work(void *arg) {
       }
     }
   }
+}
+
+struct uthread_queue *Thread_init();
+unsigned long Thread_new(int func(void *), void *args, long nbytes,
+                         struct uthread_queue *uq);
+int Thread_join(unsigned long tid, struct uthread_queue *uq);
+
+void Thread_pause(struct uthread_queue *uq);
+
+void *kthread_work(void *arg) {
+  worker_thread *worker = (worker_thread *)arg;
+  struct uthread_queue *uq = Thread_init();
+  // u_threads will handle the work from now on
+  for (int i = 0; i < NUM_UTHREADS; ++i) {
+    worker->uthreads[i] = (u_thread *)Thread_new(u_thread_work, worker,
+                                                 sizeof(worker_thread), uq);
+  }
+  Thread_join(0, uq); // will wait for u_threads here
+  printf("Pthread %lu is exiting\n", worker->thread);
   return NULL;
 }
 

@@ -18,5 +18,5 @@ project/largefile5
 project/largefile6
 assignment2/shared_mem/a.out
 project/largefile0
-project/test-nonblock
+project/pthread-server
 project/thread-server

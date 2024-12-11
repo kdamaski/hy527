@@ -56,6 +56,10 @@ int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
   new_thr->sp =
       (unsigned long *)((void *)new_thr + stack_size + sizeof(struct u_thread));
 
+  // in the bottom place the args
+  memcpy((void *)new_thr->sp, args, nbytes);
+  //
+  void *my_args = new_thr->sp;
   // Place _thrstart in the return address of our thread stack
   --new_thr->sp;
   *(new_thr->sp) = (unsigned long)_thrstart;
@@ -63,9 +67,7 @@ int Thread_new(int func(void *), void *args, size_t nbytes, ...) {
   new_thr->sp -= 4;
   new_thr->sp[1] = (unsigned long)func; // Those 2 args are for context restore
   // copy the args into the bottom of the allocated stack
-  new_thr->sp[2] =
-      (unsigned long)memcpy((void *)new_thr->sp, args,
-                            nbytes); // in the order of the given swtch.s
+  new_thr->sp[2] = (unsigned long)my_args;
 
   // init queue state
   new_thr->to_run = 1; // mark thread initialized

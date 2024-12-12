@@ -28,11 +28,12 @@ connection_context *get_context(int client_fd) {
   return ctx; // Context not found
 }
 
-connection_context *add_context(int client_fd, int file_fd) {
+connection_context *add_context(int client_fd, int file_fd, long file_sz) {
   for (int i = 0; i < CONTEXT_SZ; i++) {
     if (contexts[i].client_fd == 0) {
       contexts[i].client_fd = client_fd;
       contexts[i].file_fd = file_fd;
+      contexts[i].file_sz = file_sz;
       return &contexts[i];
     }
   }
@@ -46,6 +47,7 @@ void rm_context(int client_fd) {
       contexts[i].client_fd = 0;
       contexts[i].file_fd = 0;
       contexts[i].offset = 0;
+      contexts[i].file_sz = 0;
       break;
     }
   }
@@ -175,7 +177,8 @@ int u_thread_work(void *arg) {
               }
 
               // Add connection context for non-blocking sendfile
-              connection_context *ctx = add_context(client_fd, file_fd);
+              connection_context *ctx =
+                  add_context(client_fd, file_fd, file_size);
               if (!ctx) {
                 perror("No available context slots");
                 close(client_fd);
@@ -224,7 +227,7 @@ int u_thread_work(void *arg) {
 
           // Use sendfile() for non-blocking file transfer
           ssize_t bytes_sent =
-              sendfile(client_fd, ctx->file_fd, &ctx->offset, CHUNK_SIZE);
+              sendfile(client_fd, ctx->file_fd, &ctx->offset, ctx->file_sz);
           if (bytes_sent == 0 || errno == EPIPE) {
             // Transfer complete or client disconnected
             // fprintf(stderr, "File transfer complete for fd %d\n", client_fd);

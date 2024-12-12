@@ -2,19 +2,19 @@
 #include <pthread.h>
 
 #define CONTEXT_SZ 179
-#define CHUNK_SIZE 65536
+// #define CHUNK_SIZE 65536
 #define NUM_THREADS 4
 
 typedef struct connection_context {
   int client_fd;
   int file_fd;
   off_t offset;
-  // struct connection_context *next; // Linked list for collision resolution
+  long file_size;
 } connection_context;
 
 int hash_fd(int client_fd);
 
-connection_context *add_context(int client_fd, int file_fd);
+connection_context *add_context(int client_fd, int file_fd, long file_size);
 
 connection_context *get_context(int client_fd);
 

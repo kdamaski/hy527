@@ -39,7 +39,7 @@ connection_context *get_context(int client_fd) {
   return ctx; // Context not found
 }
 
-connection_context *add_context(int client_fd, int file_fd) {
+connection_context *add_context(int client_fd, int file_fd, long file_size) {
   // connection_context *ctx = get_context(client_fd);
   // if (ctx) {
   //   // context exists
@@ -63,6 +63,7 @@ connection_context *add_context(int client_fd, int file_fd) {
     if (contexts[i].client_fd == 0) {
       contexts[i].client_fd = client_fd;
       contexts[i].file_fd = file_fd;
+      contexts[i].file_size = file_size;
       return &contexts[i];
     }
   }
@@ -94,6 +95,7 @@ void rm_context(int client_fd) {
       contexts[i].client_fd = 0;
       contexts[i].file_fd = 0;
       contexts[i].offset = 0;
+      contexts[i].file_size = 0;
       break;
     }
   }
@@ -188,7 +190,7 @@ void *work(void *arg) {
             if (strstr(buf, "GET /large_file") != NULL) {
               // Open the requested file
               int file_fd =
-                  open("./largefile0", O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+                  open("./largefile6", O_RDONLY | O_NONBLOCK | O_CLOEXEC);
               if (file_fd < 0) {
                 perror("Failed to open largefile0");
                 close(client_fd);
@@ -206,7 +208,7 @@ void *work(void *arg) {
               off_t file_size = st.st_size;
 
               // Send HTTP header
-              char header[256];
+              char header[128];
               snprintf(header, sizeof(header),
                        "HTTP/1.1 200 OK\r\n"
                        "Content-Type: application/octet-stream\r\n"
@@ -221,7 +223,8 @@ void *work(void *arg) {
               }
 
               // Add connection context for non-blocking sendfile
-              connection_context *ctx = add_context(client_fd, file_fd);
+              connection_context *ctx =
+                  add_context(client_fd, file_fd, file_size);
               if (!ctx) {
                 perror("No available context slots");
                 close(client_fd);
@@ -270,7 +273,7 @@ void *work(void *arg) {
 
           // Use sendfile() for non-blocking file transfer
           ssize_t bytes_sent =
-              sendfile(client_fd, ctx->file_fd, &ctx->offset, CHUNK_SIZE);
+              sendfile(client_fd, ctx->file_fd, &ctx->offset, ctx->file_size);
           if (bytes_sent == 0 || errno == EPIPE) {
             // Transfer complete or client disconnected
             // fprintf(stderr, "File transfer complete for fd %d\n", client_fd);

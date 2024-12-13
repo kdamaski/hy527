@@ -4,7 +4,7 @@
 
 #define CONTEXT_SZ 179
 // #define CHUNK_SIZE 65536
-#define NUM_THREADS 4
+#define NUM_THREADS 2
 #define NUM_UTHREADS 2
 
 typedef struct connection_context {
@@ -28,6 +28,7 @@ typedef struct worker_thread {
   pthread_t thread;  // Thread ID
   int event_pipe[2]; // Pipe for passing new events to this worker
   u_thread *uthreads[NUM_UTHREADS];
+  uthread_queue *uq;
 } worker_thread;
 
 void initialize_workers();

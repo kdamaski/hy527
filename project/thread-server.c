@@ -100,7 +100,7 @@ void initialize_workers() {
 }
 
 int u_thread_work(void *arg) {
-  worker_thread *worker = (worker_thread *)arg;
+  worker_thread *worker = *(worker_thread **)arg;
 
   struct epoll_event ev, events[MAX_EVENTS];
   while (1) {
@@ -110,8 +110,8 @@ int u_thread_work(void *arg) {
       continue;
     }
     for (int i = 0; i < nfds; i++) {
-      if (events[i].data.fd ==
-          worker->event_pipe[0]) { // If we have new message in the local queue
+      // If we have new message in the local queue
+      if (events[i].data.fd == worker->event_pipe[0]) {
         // New client_fd from the main thread
         int client_fd;
         if (read(worker->event_pipe[0], &client_fd, sizeof(client_fd)) !=
@@ -122,6 +122,7 @@ int u_thread_work(void *arg) {
 
         ev.events = EPOLLIN;
         ev.data.fd = client_fd;
+        // register the new client_fd to the event queue for later handling
         if (epoll_ctl(worker->epoll_fd, EPOLL_CTL_ADD, client_fd, &ev) == -1) {
           perror("epoll_ctl: add client_fd");
           close(client_fd);
@@ -162,7 +163,7 @@ int u_thread_work(void *arg) {
               off_t file_size = st.st_size;
 
               // Send HTTP header
-              char header[256];
+              char header[128];
               snprintf(header, sizeof(header),
                        "HTTP/1.1 200 OK\r\n"
                        "Content-Type: application/octet-stream\r\n"
@@ -185,10 +186,6 @@ int u_thread_work(void *arg) {
                 close(file_fd);
                 continue;
               }
-              ctx->client_fd = client_fd;
-              ctx->file_fd = file_fd;
-              ctx->offset = 0;
-
               // Modify epoll events to watch for writable state
               ev.events = EPOLLOUT;
               ev.data.fd = client_fd;
@@ -251,8 +248,8 @@ void *kthread_work(void *arg) {
   struct uthread_queue *uq = Thread_init();
   // u_threads will handle the work from now on
   for (int i = 0; i < NUM_UTHREADS; ++i) {
-    worker->uthreads[i] = (u_thread *)Thread_new(u_thread_work, worker,
-                                                 sizeof(worker_thread), uq);
+    worker->uthreads[i] = (u_thread *)Thread_new(u_thread_work, &worker,
+                                                 sizeof(worker_thread *), uq);
   }
   Thread_join(0, uq); // will wait for u_threads here
   printf("Pthread %lu is exiting\n", worker->thread);
@@ -279,7 +276,7 @@ int main() {
     exit(EXIT_FAILURE);
   }
 
-  if (listen(server_fd, 20) < 0) {
+  if (listen(server_fd, 32) < 0) {
     perror("Listen failed");
     exit(EXIT_FAILURE);
   }
@@ -291,7 +288,7 @@ int main() {
   while (1) {
     int client_fd = accept(server_fd, NULL, NULL);
     if (client_fd < 0) {
-      perror("Accept failed");
+      // perror("Accept failed");
       continue;
     }
 

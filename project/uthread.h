@@ -14,7 +14,7 @@ struct th_ready_q {
   struct u_thread *tail;
 };
 
-struct uthread_queue {
+typedef struct uthread_queue {
   struct th_ready_q *ready_q;
   struct u_thread *join0_thread;
   struct u_thread *curr_thr;
@@ -22,7 +22,7 @@ struct uthread_queue {
   struct u_thread *free_list;
   unsigned stack_size;
   unsigned n_threads;
-};
+} uthread_queue;
 
 struct uthread_queue *Thread_init();
 unsigned long Thread_new(int func(void *), void *args, long nbytes,

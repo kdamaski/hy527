@@ -4,7 +4,7 @@
 
 #define CONTEXT_SZ 179
 // #define CHUNK_SIZE 65536
-#define NUM_THREADS 2
+#define NUM_THREADS 1
 #define NUM_UTHREADS 2
 
 typedef struct connection_context {
@@ -38,4 +38,4 @@ void distribute_to_workers(int client_fd);
 // the worker function
 void *kthread_work(void *arg);
 
-int u_thread_work(void *arg);
+void *u_thread_work(void *arg);

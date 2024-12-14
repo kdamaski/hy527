@@ -89,7 +89,7 @@ void initialize_workers() {
 
     // Add the pipe's read end to the worker's epoll instance
     struct epoll_event ev;
-    ev.events = EPOLLIN; // | EPOLLET;
+    ev.events = EPOLLIN;
     ev.data.fd = workers[i].event_pipe[0];
     epoll_ctl(workers[i].epoll_fd, EPOLL_CTL_ADD, workers[i].event_pipe[0],
               &ev);
@@ -99,7 +99,7 @@ void initialize_workers() {
   }
 }
 
-int u_thread_work(void *arg) {
+void *u_thread_work(void *arg) {
   worker_thread *worker = *(worker_thread **)arg;
 
   struct epoll_event ev, events[MAX_EVENTS];
@@ -135,7 +135,7 @@ int u_thread_work(void *arg) {
         int client_fd = events[i].data.fd;
 
         if (events[i].events & EPOLLIN) {
-          char buf[512];
+          char buf[256];
           int n = recv(client_fd, buf, sizeof(buf) - 1, 0);
 
           if (n > 0) {

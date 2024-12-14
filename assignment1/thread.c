@@ -32,7 +32,7 @@ void Thread_init(void) {
   assert(ready_q);
   ready_q->head = ready_q->tail = NULL;
   // allocate the stack size for my user-level threads
-  stack_size = 16 * KB;
+  stack_size = 4 * KB;
 
   main_thr = malloc(sizeof(struct u_thread));
   main_thr->id = -1;

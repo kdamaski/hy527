@@ -22,3 +22,5 @@ project/pthread-server
 project/thread-server
 assignment2/shared_mem/largefile6
 project/test-server
+project/non_heavy_io_curve.py
+project/heavy_io_curve.py

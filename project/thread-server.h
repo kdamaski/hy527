@@ -2,7 +2,8 @@
 #include <fcntl.h>
 #include <pthread.h>
 
-#define CONTEXT_SZ 373
+#define NUM_THREADS 4
+#define CONTEXT_SZ 503
 // 211, 223, 227, 229, 233, 239, 241, 251, 257, 263, 269, 271, 277, 281,
 // 283, 293, 307, 311, 313, 317, 331, 337, 347, 349, 353, 359, 367, 373,
 // 379, 383, 389, 397, 401, 409, 419, 421, 431, 433, 439, 443, 449, 457,
@@ -10,13 +11,12 @@
 
 // #define CHUNK_SIZE 65536
 
-#define NUM_THREADS 4
-
 typedef struct connection_context {
   int client_fd;
   int file_fd;
   off_t offset;
   long file_sz;
+  struct connection_context *next; // Linked list for collision resolution
 } connection_context;
 
 connection_context *add_context(int client_fd, int file_fd, long file_sz);

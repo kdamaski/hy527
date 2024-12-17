@@ -13,41 +13,101 @@
 #define PORT 9999
 #define MAX_EVENTS 101
 
-connection_context contexts[CONTEXT_SZ] = {0};
+connection_context *contexts[CONTEXT_SZ] = {NULL};
+
+// connection_context *get_context(int client_fd) {
+//   connection_context *ctx = NULL;
+//   for (int j = 0; j < CONTEXT_SZ; j++) {
+//     if (contexts[j].client_fd == client_fd) {
+//       ctx = &contexts[j];
+//       break;
+//     }
+//   }
+//   return ctx; // Context not found
+// }
+
+// connection_context *add_context(int client_fd, int file_fd, long file_size) {
+//   for (int i = 0; i < CONTEXT_SZ; i++) {
+//     if (contexts[i].client_fd == 0) {
+//       contexts[i].client_fd = client_fd;
+//       contexts[i].file_fd = file_fd;
+//       contexts[i].file_size = file_size;
+//       return &contexts[i];
+//     }
+//   }
+//   return NULL; // No available context
+// }
+
+// void rm_context(int client_fd) {
+//   for (int i = 0; i < CONTEXT_SZ; i++) {
+//     if (contexts[i].client_fd == client_fd) {
+//       close(contexts[i].file_fd); // Close the file descriptor
+//       contexts[i].client_fd = 0;
+//       contexts[i].file_fd = 0;
+//       contexts[i].offset = 0;
+//       contexts[i].file_size = 0;
+//       break;
+//     }
+//   }
+// }
+
+int hash_fd(int client_fd) { return (65537 * client_fd) % CONTEXT_SZ; }
 
 connection_context *get_context(int client_fd) {
-  connection_context *ctx = NULL;
-  for (int j = 0; j < CONTEXT_SZ; j++) {
-    if (contexts[j].client_fd == client_fd) {
-      ctx = &contexts[j];
-      break;
+  int hash = hash_fd(client_fd);
+
+  // Search through the linked list at the hashed index
+  connection_context *current = contexts[hash];
+  while (current) {
+    if (current->client_fd == client_fd) {
+      return current; // Found the context
     }
+    current = current->next;
   }
-  return ctx; // Context not found
+  return NULL;
 }
 
 connection_context *add_context(int client_fd, int file_fd, long file_size) {
-  for (int i = 0; i < CONTEXT_SZ; i++) {
-    if (contexts[i].client_fd == 0) {
-      contexts[i].client_fd = client_fd;
-      contexts[i].file_fd = file_fd;
-      contexts[i].file_size = file_size;
-      return &contexts[i];
-    }
+  connection_context *ctx = get_context(client_fd);
+  if (ctx) {
+    // context exists
+    // printf("Context with client_fd = %d already exists\n", client_fd);
+    return ctx;
   }
-  return NULL; // No available context
+  // If not found, create a new context
+  ctx = malloc(sizeof(connection_context));
+  if (!ctx) {
+    perror("Failed to allocate memory for connection_context");
+    return NULL;
+  }
+  int hash = hash_fd(client_fd);
+  ctx->client_fd = client_fd;
+  ctx->file_fd = file_fd;
+  ctx->offset = 0;
+  ctx->file_size = file_size;
+  ctx->next = contexts[hash]; // Add to the head of the linked list
+  contexts[hash] = ctx;
+  return ctx;
 }
 
 void rm_context(int client_fd) {
-  for (int i = 0; i < CONTEXT_SZ; i++) {
-    if (contexts[i].client_fd == client_fd) {
-      close(contexts[i].file_fd); // Close the file descriptor
-      contexts[i].client_fd = 0;
-      contexts[i].file_fd = 0;
-      contexts[i].offset = 0;
-      contexts[i].file_size = 0;
-      break;
+  int hash = hash_fd(client_fd);
+
+  connection_context *current = contexts[hash];
+  connection_context *prev = NULL;
+  while (current) {
+    if (current->client_fd == client_fd) {
+      // Found the context to remove
+      if (prev) {
+        prev->next = current->next; // Skip over the current node
+      } else {
+        contexts[hash] = current->next; // Remove head of list
+      }
+      free(current); // Free memory
+      return;
     }
+    prev = current;
+    current = current->next;
   }
 }
 
@@ -139,8 +199,14 @@ void *work(void *arg) {
 
             if (strstr(buf, "GET /large_file") != NULL) {
               // Open the requested file
-              int file_fd =
-                  open("./largefile6", O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+              int file_fd;
+              if (buf[15] == '2') {
+                file_fd =
+                    open("./largefile6", O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+              } else {
+                file_fd =
+                    open("./largefile0", O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+              }
               if (file_fd < 0) {
                 perror("Failed to open largefile0");
                 close(client_fd);
@@ -247,7 +313,8 @@ int main() {
   }
 
   int opt = 1;
-  setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+  setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt,
+             sizeof(opt));
 
   struct sockaddr_in server_addr = {.sin_family = AF_INET,
                                     .sin_port = htons(PORT),
@@ -259,7 +326,7 @@ int main() {
     exit(EXIT_FAILURE);
   }
 
-  if (listen(server_fd, 16) < 0) {
+  if (listen(server_fd, 32) < 0) {
     perror("Listen failed");
     exit(EXIT_FAILURE);
   }

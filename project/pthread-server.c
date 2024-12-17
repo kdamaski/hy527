@@ -15,20 +15,7 @@
 
 connection_context contexts[CONTEXT_SZ] = {0};
 
-int hash_fd(int client_fd) { return (65537 * client_fd) % CONTEXT_SZ; }
-
 connection_context *get_context(int client_fd) {
-  // int hash = hash_fd(client_fd);
-
-  // // Search through the linked list at the hashed index
-  // connection_context *current = contexts[hash];
-  // while (current) {
-  //   if (current->client_fd == client_fd) {
-  //     return current; // Found the context
-  //   }
-  //   current = current->next;
-  // }
-  // return NULL;
   connection_context *ctx = NULL;
   for (int j = 0; j < CONTEXT_SZ; j++) {
     if (contexts[j].client_fd == client_fd) {
@@ -40,25 +27,6 @@ connection_context *get_context(int client_fd) {
 }
 
 connection_context *add_context(int client_fd, int file_fd, long file_size) {
-  // connection_context *ctx = get_context(client_fd);
-  // if (ctx) {
-  //   // context exists
-  //   // printf("Context with client_fd = %d already exists\n", client_fd);
-  //   return ctx;
-  // }
-  // // If not found, create a new context
-  // ctx = malloc(sizeof(connection_context));
-  // if (!ctx) {
-  //   perror("Failed to allocate memory for connection_context");
-  //   return NULL;
-  // }
-  // int hash = hash_fd(client_fd);
-  // ctx->client_fd = client_fd;
-  // ctx->file_fd = file_fd;
-  // ctx->offset = 0;
-  // ctx->next = contexts[hash]; // Add to the head of the linked list
-  // contexts[hash] = ctx;
-  // return ctx;
   for (int i = 0; i < CONTEXT_SZ; i++) {
     if (contexts[i].client_fd == 0) {
       contexts[i].client_fd = client_fd;
@@ -71,24 +39,6 @@ connection_context *add_context(int client_fd, int file_fd, long file_size) {
 }
 
 void rm_context(int client_fd) {
-  // int hash = hash_fd(client_fd);
-
-  // connection_context *current = contexts[hash];
-  // connection_context *prev = NULL;
-  // while (current) {
-  //   if (current->client_fd == client_fd) {
-  //     // Found the context to remove
-  //     if (prev) {
-  //       prev->next = current->next; // Skip over the current node
-  //     } else {
-  //       contexts[hash] = current->next; // Remove head of list
-  //     }
-  //     free(current); // Free memory
-  //     return;
-  //   }
-  //   prev = current;
-  //   current = current->next;
-  // }
   for (int i = 0; i < CONTEXT_SZ; i++) {
     if (contexts[i].client_fd == client_fd) {
       close(contexts[i].file_fd); // Close the file descriptor
@@ -126,7 +76,7 @@ void initialize_workers() {
       exit(EXIT_FAILURE);
     }
 
-    fcntl(workers[i].epoll_fd, F_SETFL, O_NONBLOCK);
+    fcntl(workers[i].epoll_fd, F_SETFL, O_NONBLOCK | O_CLOEXEC);
     // Create a pipe for passing events to the worker
     if (pipe(workers[i].event_pipe) < 0) {
       perror("Failed to create event pipe");
@@ -180,7 +130,7 @@ void *work(void *arg) {
         int client_fd = events[i].data.fd;
 
         if (events[i].events & EPOLLIN) {
-          char buf[1024];
+          char buf[256];
           int n = recv(client_fd, buf, sizeof(buf) - 1, 0);
 
           if (n > 0) {
@@ -231,10 +181,6 @@ void *work(void *arg) {
                 close(file_fd);
                 continue;
               }
-              ctx->client_fd = client_fd;
-              ctx->file_fd = file_fd;
-              ctx->offset = 0;
-
               // Modify epoll events to watch for writable state
               ev.events = EPOLLOUT;
               ev.data.fd = client_fd;

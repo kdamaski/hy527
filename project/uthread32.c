@@ -116,12 +116,6 @@ unsigned long Thread_new(void *func(void *), void *args, long nbytes,
     fprintf(stderr, "memory allocation failed for thread stack\n");
     exit(1);
   }
-
-  // unsigned total_stack_sz = // syntax below says address must be aligned 16
-  //     (uq->stack_size + sizeof(struct u_thread) + nbytes + 15) & ~15;
-  // new_thr = (struct u_thread *)calloc(1, total_stack_sz);
-  // assert(new_thr);
-
   // nbytes above stack length
   new_thr->sp = (unsigned long *)((void *)new_thr + uq->stack_size +
                                   sizeof(struct u_thread));
@@ -131,14 +125,11 @@ unsigned long Thread_new(void *func(void *), void *args, long nbytes,
   if (args) {
     memcpy(new_thr->sp, args, nbytes);
   }
-  // while (((unsigned long)new_thr->sp) & 15)
-  //   new_thr->sp--;
-
   // Place _thrstart in the return address of our thread stack
   --new_thr->sp;
   *(new_thr->sp) = (unsigned long)_thrstart;
 
-  new_thr->sp -= 4;
+  new_thr->sp -= 6;
 
   new_thr->sp[1] = (unsigned long)func; // Those 2 args are for context restore
   // copy the args into the bottom of the allocated stack
@@ -175,22 +166,22 @@ void Thread_exit(void *args) {
       tmp = tmp->next;
       // ++n_threads;
     }
-    --uq->n_threads;
-    if (uq->n_threads == 0) {
-      printf("n_threads == 0. Exiting\n");
-      exit(0);
-    } else {
-      printf("Thread %lu is exiting\n", uq->curr_thr->id);
-      void *from = uq->curr_thr;
-      push_to_free(uq->curr_thr, uq->free_list);
+  }
+  --uq->n_threads;
+  if (uq->n_threads == 0) {
+    printf("n_threads == 0. Exiting\n");
+    exit(0);
+  } else {
+    // printf("Thread %lu is exiting\n", uq->curr_thr->id);
+    void *from = uq->curr_thr;
+    push_to_free(uq->curr_thr, uq->free_list);
+    uq->curr_thr = ready_dequeue(uq->ready_q);
+    if (uq->curr_thr == uq->main_thr) {
+      ready_enqueue(uq->curr_thr, uq->ready_q);
       uq->curr_thr = ready_dequeue(uq->ready_q);
-      if (uq->curr_thr == uq->main_thr) {
-        ready_enqueue(uq->curr_thr, uq->ready_q);
-        uq->curr_thr = ready_dequeue(uq->ready_q);
-        // assert(uq->curr_thr != uq->main_thr);
-      }
-      _swtch(from, uq->curr_thr);
+      // assert(uq->curr_thr != uq->main_thr);
     }
+    _swtch(from, uq->curr_thr);
   }
 }
 
@@ -199,11 +190,11 @@ void Thread_pause(struct uthread_queue *uq) {
   assert(uq->curr_thr);
   // assert(n_threads > 1);
   // TODO temp hack to ignore swaping to main thread
-  if (uq->curr_thr->id != -1) { // if not main
-    ready_enqueue(uq->curr_thr, uq->ready_q);
-  } else {
-    uq->n_threads--;
-  }
+  // if (uq->curr_thr->id != (unsigned long)-1) { // if not main
+  ready_enqueue(uq->curr_thr, uq->ready_q);
+  // } else {
+  //   uq->n_threads--;
+  // }
   void *from = uq->curr_thr;
   void *to = uq->curr_thr = ready_dequeue(uq->ready_q);
   _swtch(from, to);

@@ -65,15 +65,17 @@ unsigned long Thread_new(void *func(void *), void *args, long nbytes,
   --new_thr->sp;
   *(new_thr->sp) = (unsigned long)_thrstart;
 
-  new_thr->sp -= 24;
+  // new_thr->sp -= 24;
 
-  new_thr->sp[17] = (unsigned long)func; // Those 2 args are for context restore
+  // new_thr->sp[17] = (unsigned long)func; // Those 2 args are for context
+  // restore
+  // // copy the args into the bottom of the allocated stack
+  // new_thr->sp[18] = (unsigned long)my_args;
+  new_thr->sp -= 10;
+
+  new_thr->sp[1] = (unsigned long)func; // Those 2 args are for context restore
   // copy the args into the bottom of the allocated stack
-  new_thr->sp[18] = (unsigned long)my_args;
-  // new_thr->sp[3] = 0; // Placeholder for %r12 (not used here)
-  // new_thr->sp[4] = 0;
-  // new_thr->sp[5] = 0;
-  // new_thr->sp[6] = 0;
+  new_thr->sp[2] = (unsigned long)my_args;
 
   // init queue state
   new_thr->to_run = 1; // mark thread initialized
@@ -102,22 +104,22 @@ void Thread_exit(void *args) {
       tmp = tmp->next;
       // ++n_threads;
     }
-    --uq->n_threads;
-    if (uq->n_threads == 0) {
-      printf("n_threads == 0. Exiting\n");
-      exit(0);
-    } else {
-      printf("Thread %lu is exiting\n", uq->curr_thr->id);
-      void *from = uq->curr_thr;
-      push_to_free(uq->curr_thr, uq->free_list);
+  }
+  --uq->n_threads;
+  if (uq->n_threads == 0) {
+    printf("n_threads == 0. Exiting\n");
+    exit(0);
+  } else {
+    // printf("Thread %lu is exiting\n", uq->curr_thr->id);
+    void *from = uq->curr_thr;
+    push_to_free(uq->curr_thr, uq->free_list);
+    uq->curr_thr = ready_dequeue(uq->ready_q);
+    if (uq->curr_thr == uq->main_thr) {
+      ready_enqueue(uq->curr_thr, uq->ready_q);
       uq->curr_thr = ready_dequeue(uq->ready_q);
-      if (uq->curr_thr == uq->main_thr) {
-        ready_enqueue(uq->curr_thr, uq->ready_q);
-        uq->curr_thr = ready_dequeue(uq->ready_q);
-        // assert(uq->curr_thr != uq->main_thr);
-      }
-      _swtch(from, uq->curr_thr);
+      // assert(uq->curr_thr != uq->main_thr);
     }
+    _swtch(from, uq->curr_thr);
   }
 }
 

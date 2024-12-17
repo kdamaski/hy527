@@ -70,6 +70,8 @@ void distribute_to_worker(int client_fd) {
   }
 }
 
+void *kthread_work(void *arg);
+
 void initialize_workers() {
   for (int i = 0; i < NUM_THREADS; i++) {
     // init per kernel thread local queue
@@ -81,7 +83,6 @@ void initialize_workers() {
 
     // make the fd non-blocking
     fcntl(workers[i].epoll_fd, F_SETFL, O_NONBLOCK | O_CLOEXEC);
-    // Create a pipe for passing events to the worker
     if (pipe(workers[i].event_pipe) < 0) {
       perror("Failed to create event pipe");
       exit(EXIT_FAILURE);
@@ -94,15 +95,14 @@ void initialize_workers() {
     epoll_ctl(workers[i].epoll_fd, EPOLL_CTL_ADD, workers[i].event_pipe[0],
               &ev);
 
-    // Create the worker thread
     pthread_create(&workers[i].thread, NULL, kthread_work, &workers[i]);
   }
 }
 
 void *u_thread_work(void *arg) {
   worker_thread *worker = *(worker_thread **)arg;
-
   struct epoll_event ev, events[MAX_EVENTS];
+
   while (1) {
     int nfds = epoll_wait(worker->epoll_fd, events, MAX_EVENTS, -1);
     if (nfds < 0) {
@@ -241,17 +241,17 @@ void *u_thread_work(void *arg) {
       }
     }
   }
+  return NULL;
 }
 
 void *kthread_work(void *arg) {
   worker_thread *worker = (worker_thread *)arg;
-  struct uthread_queue *uq = Thread_init();
+  worker->uq = Thread_init();
   // u_threads will handle the work from now on
   for (int i = 0; i < NUM_UTHREADS; ++i) {
-    worker->uthreads[i] = (u_thread *)Thread_new(u_thread_work, &worker,
-                                                 sizeof(worker_thread *), uq);
+    Thread_new(u_thread_work, &worker, sizeof(worker_thread *), worker->uq);
   }
-  Thread_join(0, uq); // will wait for u_threads here
+  Thread_join(0, worker->uq); // will wait for u_threads here
   printf("Pthread %lu is exiting\n", worker->thread);
   return NULL;
 }

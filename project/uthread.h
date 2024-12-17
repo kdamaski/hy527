@@ -7,6 +7,7 @@ typedef struct u_thread {
   struct u_thread *next;
   struct u_thread *jlist; // a jlist for thread
   int to_run;             // i mainly care for free or active
+  int client_fd;
 } u_thread;
 
 struct th_ready_q {

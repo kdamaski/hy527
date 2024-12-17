@@ -2,6 +2,7 @@
 #include "uthread.h"
 #include <errno.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,14 +14,6 @@
 
 #define PORT 9999
 #define MAX_EVENTS 101
-
-// typedef struct worker_thread {
-//   struct u_thread *uthreads[NUM_UTHREADS];
-//   int event_pipe[2]; // Pipe for passing new events to this worker
-//   uthread_queue *uq;
-//   int epoll_fd;
-//   pthread_t thread; // Thread ID
-// } worker_thread;
 
 connection_context contexts[CONTEXT_SZ] = {0};
 
@@ -59,25 +52,10 @@ void rm_context(int client_fd) {
     }
   }
 }
-
+void *kthread_work(void *arg);
 worker_thread workers[NUM_THREADS];
 
-int next_worker = 0;
-void distribute_to_worker(int client_fd) {
-
-  // Choose a worker in a round-robin fashion
-  int worker_index = next_worker;
-  next_worker = (next_worker + 1) % NUM_THREADS;
-
-  // Pass the client_fd to the worker via its event pipe
-  if (write(workers[worker_index].event_pipe[1], &client_fd,
-            sizeof(client_fd)) == -1) {
-    perror("Failed to write fd into workers' event pipe");
-    exit(EXIT_FAILURE);
-  }
-}
-
-void initialize_workers() {
+void start_workers() {
   for (int i = 0; i < NUM_THREADS; i++) {
     // init per kernel thread local queue
     workers[i].epoll_fd = epoll_create1(0);
@@ -87,7 +65,7 @@ void initialize_workers() {
     }
 
     // make the fd non-blocking
-    fcntl(workers[i].epoll_fd, F_SETFL, O_NONBLOCK);
+    fcntl(workers[i].epoll_fd, F_SETFL, O_NONBLOCK | O_CLOEXEC);
     if (pipe(workers[i].event_pipe) < 0) {
       perror("Failed to create event pipe");
       exit(EXIT_FAILURE);
@@ -104,168 +82,188 @@ void initialize_workers() {
   }
 }
 
-void *epollout_u_thread(void *arg) {
+void *uthread_work(void *arg) {
   worker_thread *worker = (worker_thread *)arg;
-  struct epoll_event events[MAX_EVENTS], ev;
+  int client_fd = ((struct u_thread *)(worker->uq->curr_thr->id))->client_fd;
+
+  connection_context *ctx = NULL;
+  char buf[256];
 
   while (1) {
-    int nfds = epoll_wait(worker->epoll_fd, events, MAX_EVENTS, -1);
-    for (int i = 0; i < nfds; i++) {
-      int client_fd = events[i].data.fd;
-      // if there is a large_file to be sent
-      if (events[i].events & EPOLLOUT) {
-        connection_context *ctx = get_context(client_fd);
+    // Check if we're sending a file
+    if (ctx && ctx->file_fd > 0) {
+      // Use sendfile() to send the file in chunks
+      ssize_t bytes_sent =
+          sendfile(client_fd, ctx->file_fd, &ctx->offset, ctx->file_sz);
+      if (bytes_sent == 0 || errno == EPIPE) {
+        // File transfer complete or client disconnected
+        // printf("File transfer complete for fd %d\n", client_fd);
+        close(client_fd);
+        rm_context(client_fd); // Cleanup context
+        break;
+      } else if (bytes_sent < 0) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+          // perror("sendfile failed");
+          close(client_fd);
+          rm_context(client_fd);
+          break;
+        }
+      }
+
+      // Pause the user thread; wait for EPOLLOUT if needed
+      Thread_pause(worker->uq);
+
+      continue; // Retry sending when unpaused
+    }
+
+    // Handle incoming data
+    int n = recv(client_fd, buf, sizeof(buf) - 1, 0);
+    if (n > 0) {
+      buf[n] = '\0'; // Null-terminate the string
+      // printf("User thread received: %s\n", buf);
+
+      if (strstr(buf, "GET /large_file") != NULL) {
+        // Open the requested file
+        int file_fd = open("./largefile0", O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        if (file_fd < 0) {
+          perror("Failed to open largefile0");
+          close(client_fd);
+          break;
+        }
+
+        struct stat st;
+        if (fstat(file_fd, &st) == -1) {
+          perror("Failed to get file stats");
+          close(client_fd);
+          close(file_fd);
+          break;
+        }
+
+        off_t file_size = st.st_size;
+
+        // Send HTTP header
+        char header[128];
+        snprintf(header, sizeof(header),
+                 "HTTP/1.1 200 OK\r\n"
+                 "Content-Type: application/octet-stream\r\n"
+                 "Content-Length: %ld\r\n"
+                 "Connection: close\r\n\r\n",
+                 file_size);
+        if (send(client_fd, header, strlen(header), 0) <= 0) {
+          perror("Failed to send HTTP header");
+          close(client_fd);
+          close(file_fd);
+          break;
+        }
+
+        // Create context for non-blocking file transfer
+        ctx = add_context(client_fd, file_fd, file_size);
         if (!ctx) {
-          fprintf(stderr, "No context for client_fd %d\n", client_fd);
+          perror("No available context slots");
           close(client_fd);
-          continue;
+          close(file_fd);
+          break;
         }
 
-        // Use sendfile() for non-blocking file transfer
-        ssize_t bytes_sent =
-            sendfile(client_fd, ctx->file_fd, &ctx->offset, ctx->file_sz);
-        if (bytes_sent == 0 || errno == EPIPE) {
-          // Transfer complete or client disconnected
-          // fprintf(stderr, "File transfer complete for fd %d\n", client_fd);
-          close(client_fd);
-          rm_context(client_fd);
-        } else if (bytes_sent < 0) {
-          if (errno != EAGAIN && errno != EWOULDBLOCK) {
-            // perror("sendfile failed");
-            close(client_fd);
-            rm_context(client_fd);
-          }
-        }
-      }
-    }
-    Thread_pause(worker->uq);
-  }
-}
-
-void *epollin_u_thread(void *arg) {
-  worker_thread *worker = (worker_thread *)arg;
-  struct epoll_event events[MAX_EVENTS], ev;
-
-  while (1) {
-    int nfds = epoll_wait(worker->epoll_fd, events, MAX_EVENTS, -1);
-
-    for (int i = 0; i < nfds; i++) {
-      int client_fd = events[i].data.fd;
-      if (client_fd == worker->event_pipe[0]) {
-        // New client_fd from the main thread
-        int client_fd;
-        if (read(worker->event_pipe[0], &client_fd, sizeof(client_fd)) !=
-            sizeof(client_fd)) {
-          fprintf(stderr, "Failed to read client_fd from pipe\n");
-          continue;
-        }
-
-        ev.events = EPOLLIN;
+        // Modify epoll events to watch for writable state
+        struct epoll_event ev;
+        ev.events = EPOLLOUT; // Switch to write mode
         ev.data.fd = client_fd;
-        // register the new client_fd to the event queue for later handling
-        if (epoll_ctl(worker->epoll_fd, EPOLL_CTL_ADD, client_fd, &ev) == -1) {
-          perror("epoll_ctl: add client_fd");
-          close(client_fd);
-          continue;
-        }
-      } else if (events[i].events & EPOLLIN) {
-        char buf[256];
-        int n = recv(client_fd, buf, sizeof(buf) - 1, 0);
 
-        if (n > 0) {
-          buf[n] = '\0'; // Null-terminate the received data
-          // printf("curr_thr received: %s\n", buf);
-
-          if (strstr(buf, "GET /large_file") != NULL) {
-            // Open the requested file
-            int file_fd = open("./largefile0", O_RDONLY | O_NONBLOCK);
-            if (file_fd < 0) {
-              perror("Failed to open largefile0");
-              close(client_fd);
-              continue;
-            }
-
-            struct stat st;
-            if (fstat(file_fd, &st) == -1) {
-              perror("Failed to get file stats");
-              close(client_fd);
-              close(file_fd);
-              continue;
-            }
-
-            off_t file_size = st.st_size;
-
-            // Send HTTP header
-            char header[256];
-            snprintf(header, sizeof(header),
-                     "HTTP/1.1 200 OK\r\n"
-                     "Content-Type: application/octet-stream\r\n"
-                     "Content-Length: %ld\r\n"
-                     "Connection: close\r\n\r\n",
-                     file_size);
-            if (send(client_fd, header, strlen(header), 0) <= 0) {
-              perror("Failed to send HTTP header");
-              close(client_fd);
-              close(file_fd);
-              continue;
-            }
-
-            // Add connection context for non-blocking sendfile
-            connection_context *ctx =
-                add_context(client_fd, file_fd, file_size);
-            if (!ctx) {
-              perror("No available context slots");
-              close(client_fd);
-              close(file_fd);
-              continue;
-            }
-
-            // Modify epoll events to watch for writable state
-            ev.events = EPOLLOUT;
-            ev.data.fd = client_fd;
-            epoll_ctl(worker->epoll_fd, EPOLL_CTL_MOD, client_fd, &ev);
-
-          } else if (strstr(buf, "GET /") != NULL) {
-            // Handle "Hello, World!" request
-            const char *response = "HTTP/1.1 200 OK\r\n"
-                                   "Content-Type: text/plain\r\n"
-                                   "Content-Length: 13\r\n"
-                                   "Connection: close\r\n\r\n"
-                                   "Hello, World!";
-            send(client_fd, response, strlen(response), 0);
-            close(client_fd);
-          }
-        } else if (n == 0) {
-          // Client disconnected
+        if (epoll_ctl(worker->epoll_fd, EPOLL_CTL_MOD, client_fd, &ev) == -1) {
+          perror("epoll_ctl: switch to EPOLLOUT");
           close(client_fd);
           rm_context(client_fd);
-        } else {
-          perror("recv failed");
-          close(client_fd);
-          rm_context(client_fd);
+          break;
         }
-      } else {
+
+        // Pause the user thread until the connection is writable
         Thread_pause(worker->uq);
+      } else if (strstr(buf, "GET /") != NULL) {
+        // Handle "Hello, World!" request
+        const char *response = "HTTP/1.1 200 OK\r\n"
+                               "Content-Type: text/plain\r\n"
+                               "Content-Length: 13\r\n"
+                               "Connection: close\r\n\r\n"
+                               "Hello, World!";
+        send(client_fd, response, strlen(response), 0);
+        close(client_fd);
+        break;
       }
+    } else if (n == 0) {
+      // Client disconnected
+      // printf("Client disconnected: fd %d\n", client_fd);
+      close(client_fd);
+      break;
+    } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      // No data available; user thread can pause
+      Thread_pause(worker->uq);
+    } else {
+      perror("recv failed");
+      close(client_fd);
+      break;
     }
   }
+
+  return worker->uq; // Needed in thread_exit
 }
 
 void *kthread_work(void *arg) {
   worker_thread *worker = (worker_thread *)arg;
   worker->uq = Thread_init();
-  // u_threads will handle the work from now on
 
-  worker->uthreads[0] = (struct u_thread *)Thread_new(
-      epollin_u_thread, (void *)worker, sizeof(worker_thread), worker->uq);
-  worker->uthreads[1] = (struct u_thread *)Thread_new(
-      epollout_u_thread, (void *)worker, sizeof(worker_thread), worker->uq);
-  Thread_join(0, worker->uq); // will wait for u_threads here
-  printf("Pthread %lu is exiting\n", worker->thread);
+  struct epoll_event events[MAX_EVENTS], ev;
+
+  while (1) {
+    int nfds = epoll_wait(worker->epoll_fd, events, MAX_EVENTS, -1);
+
+    for (int i = 0; i < nfds; i++) {
+      int fd = events[i].data.fd;
+
+      // Check if the event came from the event pipe (new connections)
+      if (fd == worker->event_pipe[0]) {
+        int client_fd;
+        while (read(worker->event_pipe[0], &client_fd, sizeof(client_fd)) ==
+               sizeof(client_fd)) {
+          // Add the new connection to epoll
+          struct epoll_event ev;
+          ev.events = EPOLLIN; // Initially wait for input
+          ev.data.fd = client_fd;
+
+          if (epoll_ctl(worker->epoll_fd, EPOLL_CTL_ADD, client_fd, &ev) < 0) {
+            perror("epoll_ctl: add client_fd");
+            close(client_fd);
+            continue;
+          }
+
+          // Create a user thread for this connection
+          u_thread *uthread = (u_thread *)Thread_new(
+              uthread_work, worker, sizeof(worker_thread), worker->uq);
+          uthread->client_fd = client_fd;
+        }
+        // else {
+        //   fprintf(stderr, "Failed to read client_fd from pipe\n");
+        //   continue;
+        // }
+      } else {
+        // The event is from an existing connection
+        if (events[i].events & (EPOLLIN | EPOLLOUT)) {
+          Thread_pause(worker->uq);
+        }
+        if (events[i].events & (EPOLLERR | EPOLLHUP)) {
+          // Cleanup the connection
+          // fprintf(stderr, "Entered EPOLLER or EPOLLHUP\n");
+          close(fd);
+          epoll_ctl(worker->epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+        }
+      }
+    }
+  }
   return NULL;
 }
 
 int main() {
+
   int server_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (server_fd < 0) {
     perror("Socket creation failed");
@@ -273,7 +271,8 @@ int main() {
   }
 
   int opt = 1;
-  setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+  setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt,
+             sizeof(opt));
 
   struct sockaddr_in server_addr = {.sin_family = AF_INET,
                                     .sin_port = htons(PORT),
@@ -290,10 +289,9 @@ int main() {
     exit(EXIT_FAILURE);
   }
 
-  // Initialize worker threads
-  initialize_workers();
+  start_workers();
 
-  // Main event loop
+  int next_worker = 0;
   while (1) {
     int client_fd = accept(server_fd, NULL, NULL);
     if (client_fd < 0) {
@@ -302,10 +300,20 @@ int main() {
     }
 
     // Set the new socket to non-blocking mode
-    fcntl(client_fd, F_SETFL, O_NONBLOCK);
+    fcntl(client_fd, F_SETFL, O_NONBLOCK | O_CLOEXEC);
 
     // Distribute the connection to a worker
-    distribute_to_worker(client_fd);
+
+    // Choose a worker in a round-robin fashion
+    int worker_index = next_worker;
+    next_worker = (next_worker + 1) % NUM_THREADS;
+
+    // Pass the client_fd to the worker via its event pipe
+    if (write(workers[worker_index].event_pipe[1], &client_fd,
+              sizeof(client_fd)) == -1) {
+      perror("Failed to write fd into workers' event pipe");
+      exit(EXIT_FAILURE);
+    }
   }
 
   close(server_fd);

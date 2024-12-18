@@ -109,7 +109,7 @@ unsigned long Thread_new(void *func(void *), void *args, long nbytes,
   struct u_thread *new_thr = NULL;
   // start of critical section. Will care when preemption comes
   // good time to free the terminated threads before i have a stack smash or sth
-  empty_free(uq->free_list);
+  // empty_free(uq->free_list);
   if (posix_memalign((void **)&new_thr, 16,
                      (uq->stack_size + sizeof(struct u_thread) + nbytes + 15) &
                          ~15) != 0) {
@@ -234,22 +234,22 @@ int Thread_join(unsigned long tid, struct uthread_queue *uq) {
   }
 }
 
-void *mytestfunc(void *args) {
-  struct uthread_queue *uq = (struct uthread_queue *)args;
-  print_Q(uq);
-  Thread_pause(uq);
-  return args;
-}
+// void *mytestfunc(void *args) {
+//   struct uthread_queue *uq = (struct uthread_queue *)args;
+//   print_Q(uq);
+//   Thread_pause(uq);
+//   return args;
+// }
 
-int myjointestfunc(void *args) {
-  struct uthread_queue *uq = (struct uthread_queue *)args;
+// int myjointestfunc(void *args) {
+//   struct uthread_queue *uq = (struct uthread_queue *)args;
 
-  Thread_join(
-      Thread_new(mytestfunc, (void *)(uq), sizeof(struct uthread_queue), uq),
-      uq);
+//   Thread_join(
+//       Thread_new(mytestfunc, (void *)(uq), sizeof(struct uthread_queue), uq),
+//       uq);
 
-  return Thread_self(*uq->curr_thr);
-}
+//   return Thread_self(*uq->curr_thr);
+// }
 
 // int main() {
 //   struct uthread_queue *uq = Thread_init();
